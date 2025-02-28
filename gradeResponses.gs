@@ -1657,3 +1657,32 @@ function fixAllSheetFormatting() {
   fixTextAlignment();
   SpreadsheetApp.getActiveSpreadsheet().toast("Sheet formatting has been fixed", "Formatting Fixed", 5);
 }
+
+/**
+ * Get answer letters for display
+ */
+function getAnswerLetters(answerText, qID, answerMapping) {
+    if (!answerText || !answerMapping || !answerMapping[qID]) return answerText;
+
+    if (answerText.includes(',')) {
+        // Multiple select
+        return answerText.split(',')
+            .map(a => {
+                const letterCode = answerMapping[qID][a.toLowerCase().trim()];
+                return letterCode ? letterCode : a.trim();
+            })
+            .join(',');
+    }
+
+    // Single select
+    const letterCode = answerMapping[qID][answerText.toLowerCase().trim()];
+    return letterCode ? letterCode : answerText;
+}
+
+/**
+ * Shorten long answer text for display
+ */
+function shortenAnswerText(answer, maxLength = 50) {
+    if (!answer || answer.length <= maxLength) return answer;
+    return answer.substring(0, maxLength) + "...";
+}
