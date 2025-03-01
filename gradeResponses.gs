@@ -788,6 +788,8 @@ function setupTriggers() {
     for (let i = 0; i < triggers.length; i++) {
         ScriptApp.deleteTrigger(triggers[i]);
     }
+
+    
     
     // Create time trigger to process the queue every 5 minutes
     ScriptApp.newTrigger('processQueue')
@@ -812,6 +814,12 @@ function setupTriggers() {
         .timeBased()
         .everyHours(12)
         .create();
+
+    ScriptApp.newTrigger('updateDailyQuestions')
+      .timeBased()
+      .atHour(0)
+      .everyDays(1)
+      .create();
         
     console.log("✅ All triggers set up successfully");
 }
