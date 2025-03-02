@@ -1054,14 +1054,14 @@ function processQueue() {
     
     // If more remain, schedule another run
     if (pendingCount < pendingIndices.length) {
-      ScriptApp.newTrigger('optimizedProcessQueue')
+      ScriptApp.newTrigger('processQueue')
         .timeBased()
         .after(60000) // 1 minute
         .create();
       console.log("⏱️ Scheduled additional queue processing in 1 minute");
     }
   } catch (e) {
-    console.error("❌ Error in optimizedProcessQueue:", e.message, e.stack);
+    console.error("❌ Error in processQueue:", e.message, e.stack);
     logError('Process Queue', `Error processing queue: ${e.message}\n${e.stack}`);
   } finally {
     if (lock.hasLock()) {
@@ -1711,26 +1711,50 @@ function fixTextAlignment() {
 function onOpen() {
     const ui = SpreadsheetApp.getUi();
     ui.createMenu('Quiz Admin')
+        // Response Processing Section
         .addItem('Process Pending Responses', 'processQueue')
         .addItem('Flush All Pending Responses', 'flushQueue')
         .addItem('Grade Responses', 'gradeResponses')
         .addItem('Sync Responses', 'syncResponses')
-        .addItem('Update Processed Responses', 'updateProcessedResponses')
         .addSeparator()
-        .addItem('Delete Synced Data', 'deleteSyncData')
-        .addItem('Reset Scores', 'resetAllScores')
+        
+        // Leaderboard & Scores Section
         .addItem('Update Leaderboard', 'updateLeaderboard')
         .addSeparator()
-        .addItem('Fix Formatting & Alignment', 'fixAllSheetFormatting')
-        .addItem('Clear Audit Log', 'clearAuditLog')
-        .addItem('Archive Old Audit Data', 'archiveOldData')
-        .addItem('Add Test Data (10 Entries)', 'addTestData')
-        .addItem('Clear Caches', 'clearCaches')
-        .addSeparator()
-        .addItem('Setup Automatic Processing', 'setupTriggers')
-        .addItem('Update Audit Log Formatting', 'updateAuditLogFormatting')
+        
+        // Manual Points Management
         .addItem('Add Manual Points', 'showManualPointsDialog')
         .addItem('Process Manual Form Grades', 'handleFormGradeOverride')
+        .addItem('Setup Manual Grade Processing Log', 'setupManualGradeProcessingLog')
+        .addItem('Recover Bonus Points', 'recoverBonusPoints')
+        .addSeparator()
+        
+        // Maintenance Section
+        .addItem('Fix Timestamp Display', 'fixTimestampDisplay')
+        .addItem('Check Timestamps', 'checkForTimestamps')
+        .addItem('Clean Duplicate Responses', 'cleanupProcessedResponses')
+        .addItem('Fix Formatting & Alignment', 'fixAllSheetFormatting')
+        .addSeparator()
+        
+        // Question Management
+        .addItem('Update Daily Questions', 'updateDailyQuestions')
+        .addItem('Reset Daily Questions Trigger', 'resetDailyQuestionsTrigger')
+        .addSeparator()
+        
+        // Competition Management
+        .addItem('Determine Weekly Winners', 'testDetermineWinners')
+        .addSeparator()
+        
+        // Administrative Section
+        .addItem('Reset All Scores', 'resetAllScores')
+        .addItem('Clear Audit Log', 'clearAuditLog')
+        .addItem('Archive Old Audit Data', 'archiveOldData')
+        .addSeparator()
+        
+        // Testing & Configuration
+        .addItem('Add Test Data (10 Entries)', 'addTestData')
+        .addItem('Clear Caches', 'clearCaches')
+        .addItem('Setup Automatic Processing', 'setupTriggers')
         .addToUi();
 }
 
