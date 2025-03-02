@@ -33,4 +33,4 @@ Each team participating in the competition has a dedicated section showcasing th
 
 By integrating various Google Workspace tools and custom scripts, the "Nursing Patient Safety March Madness" project creates an engaging and seamless experience for all participants, promoting teamwork and a sense of community within the nursing staff.
 
-Implementation --> go to Implementation.md
+Implementation --> [go to Implementation.md](https://github.com/lexthoms411/March-Madness/blob/main/Implementation.md)
