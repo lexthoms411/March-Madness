@@ -900,7 +900,7 @@ function onFormSubmit(e) {
 /**
  * Process the queue of submissions (runs every 5 minutes)
  */
-function processQueue() {
+/**function processQueue() {
     // Use lock service to prevent concurrent execution
     const lock = LockService.getScriptLock();
     try {
@@ -991,6 +991,83 @@ function processQueue() {
             lock.releaseLock();
         }
     }
+}
+*/
+
+function processQueue() {
+  const lock = LockService.getScriptLock();
+  try {
+    if (!lock.tryLock(10000)) {
+      console.log("Could not obtain lock for processing queue. Another process is running.");
+      return;
+    }
+    
+    console.log("🔄 Processing submission queue...");
+    
+    const sheet = SpreadsheetApp.getActiveSpreadsheet();
+    const queueSheet = sheet.getSheetByName("Processing Queue");
+    
+    if (!queueSheet) {
+      console.log("ℹ️ No queue sheet found - nothing to process");
+      return;
+    }
+    
+    const queueData = queueSheet.getDataRange().getValues();
+    if (queueData.length <= 1) {
+      console.log("ℹ️ No items in queue to process");
+      return;
+    }
+    
+    // Count how many we need to process
+    let pendingCount = 0;
+    const pendingIndices = [];
+    
+    for (let i = 1; i < queueData.length; i++) {
+      if (queueData[i][2] === "No") {
+        pendingCount++;
+        pendingIndices.push(i);
+        
+        // Only process a limited number at once to avoid timeout
+        if (pendingCount >= 5) break;
+      }
+    }
+    
+    if (pendingCount === 0) {
+      console.log("ℹ️ No pending items in queue");
+      return;
+    }
+    
+    console.log(`🔄 Processing ${pendingCount} queued submissions...`);
+    
+    // First sync all responses to make sure we have the latest data
+    // But skip if we already have processed a lot recently
+    if (pendingCount < 3) {
+      syncResponses();
+    }
+    
+    // Process limited batch to avoid timeout
+    const batchIndices = pendingIndices.slice(0, pendingCount);
+    processBatchFromQueue(batchIndices, queueSheet, queueData);
+    
+    // Only update processed responses if we're not about to time out
+    updateProcessedResponses();
+    
+    // If more remain, schedule another run
+    if (pendingCount < pendingIndices.length) {
+      ScriptApp.newTrigger('optimizedProcessQueue')
+        .timeBased()
+        .after(60000) // 1 minute
+        .create();
+      console.log("⏱️ Scheduled additional queue processing in 1 minute");
+    }
+  } catch (e) {
+    console.error("❌ Error in optimizedProcessQueue:", e.message, e.stack);
+    logError('Process Queue', `Error processing queue: ${e.message}\n${e.stack}`);
+  } finally {
+    if (lock.hasLock()) {
+      lock.releaseLock();
+    }
+  }
 }
 
 /**
@@ -1693,4 +1770,270 @@ function getAnswerLetters(answerText, qID, answerMapping) {
 function shortenAnswerText(answer, maxLength = 50) {
     if (!answer || answer.length <= maxLength) return answer;
     return answer.substring(0, maxLength) + "...";
+}
+
+function restoreTimestamps() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet();
+  const processedSheet = sheet.getSheetByName("Processed Responses");
+  const rawResponsesSheet = sheet.getSheetByName("Form Responses (Raw)");
+  
+  if (!processedSheet || !rawResponsesSheet) {
+    console.error("Required sheets not found");
+    return;
+  }
+  
+  // Get data from both sheets
+  const processedData = processedSheet.getDataRange().getValues();
+  const rawData = rawResponsesSheet.getDataRange().getValues();
+  
+  // Create a map of mnemonic to timestamps from processed responses
+  const timestampMap = new Map();
+  
+  for (let i = 1; i < processedData.length; i++) {
+    const timestamp = processedData[i][0]; // Timestamp is in column A
+    const mnemonic = processedData[i][1]?.toLowerCase()?.trim() || ""; // Mnemonic is in column B
+    
+    if (timestamp && mnemonic) {
+      timestampMap.set(mnemonic, timestamp);
+    }
+  }
+  
+  // Track updates needed
+  let updatesNeeded = 0;
+  const updates = [];
+  
+  // Check raw responses sheet for missing timestamps
+  for (let i = 1; i < rawData.length; i++) {
+    const existingTimestamp = rawData[i][0];
+    const mnemonic = rawData[i][1]?.toLowerCase()?.trim() || "";
+    
+    // If timestamp is missing but we have mnemonic data
+    if ((!existingTimestamp || existingTimestamp === "") && mnemonic) {
+      const matchTimestamp = timestampMap.get(mnemonic);
+      
+      if (matchTimestamp) {
+        // Queue the update
+        updates.push([i+1, matchTimestamp]);
+        updatesNeeded++;
+      }
+    }
+  }
+  
+  console.log(`Found ${updatesNeeded} missing timestamps to restore`);
+  
+  if (updatesNeeded > 0) {
+    for (const [row, timestamp] of updates) {
+      rawResponsesSheet.getRange(row, 1).setValue(timestamp);
+      // Add a small delay to prevent overloading
+      Utilities.sleep(50);
+    }
+    
+    // Fix formatting
+    if (rawResponsesSheet.getLastRow() > 1) {
+      const timestampRange = rawResponsesSheet.getRange(2, 1, rawResponsesSheet.getLastRow()-1, 1);
+      timestampRange.setNumberFormat("M/d/yyyy h:mm:ss");
+    }
+    
+    console.log(`Restored ${updatesNeeded} timestamps`);
+  } else {
+    console.log("No missing timestamps found");
+  }
+}
+
+function cleanupProcessedResponses() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet();
+  const processedSheet = sheet.getSheetByName("Processed Responses");
+  
+  if (!processedSheet) {
+    console.error("Processed Responses sheet not found");
+    return;
+  }
+  
+  const data = processedSheet.getDataRange().getValues();
+  
+  if (data.length <= 1) {
+    console.log("No data to clean up");
+    return;
+  }
+  
+  // Create a set of unique entries
+  const uniqueEntries = new Map();
+  const duplicates = [];
+  
+  // Skip header row
+  for (let i = 1; i < data.length; i++) {
+    const timestamp = data[i][0];
+    const mnemonic = data[i][1];
+    
+    if (!timestamp || !mnemonic) continue;
+    
+    const key = `${mnemonic}_${timestamp}`;
+    
+    if (!uniqueEntries.has(key)) {
+      uniqueEntries.set(key, i+1); // Store row number
+    } else {
+      duplicates.push(i+1); // This is a duplicate row
+    }
+  }
+  
+  console.log(`Found ${duplicates.length} duplicate entries`);
+  
+  // Delete duplicates in reverse order to avoid index shifting
+  if (duplicates.length > 0) {
+    for (let i = duplicates.length - 1; i >= 0; i--) {
+      processedSheet.deleteRow(duplicates[i]);
+    }
+    console.log(`Removed ${duplicates.length} duplicate entries`);
+  }
+}
+
+function diagnoseTimestampIssue() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet();
+  const rawSheet = sheet.getSheetByName("Form Responses (Raw)");
+  const formSheet = sheet.getSheetByName(SHEETS.FORM_RESPONSES);
+  
+  if (!rawSheet || !formSheet) {
+    console.log("Required sheets not found");
+    return;
+  }
+  
+  // Check protection
+  const protections = rawSheet.getProtections(SpreadsheetApp.ProtectionType.RANGE);
+  for (const p of protections) {
+    const range = p.getRange();
+    if (range.getColumn() === 1) {
+      console.log("🔒 Column A is protected! Can't modify it.");
+    }
+  }
+  
+  // Check data validation
+  const validation = rawSheet.getRange("A2").getDataValidation();
+  if (validation) {
+    console.log("⚠️ Column A has data validation rules: " + validation.getCriteriaType());
+  }
+  
+  // Check for formulas
+  const formulas = rawSheet.getRange("A2:A10").getFormulas();
+  let hasFormulas = false;
+  for (const row of formulas) {
+    if (row[0]) {
+      hasFormulas = true;
+      console.log("📝 Column A contains formulas: " + row[0]);
+      break;
+    }
+  }
+  
+  // Test writing a timestamp and check if it persists
+  console.log("🧪 Testing timestamp writing...");
+  const testRow = 2; // Use the second row for testing
+  const testTimestamp = new Date();
+  rawSheet.getRange(testRow, 1).setValue(testTimestamp);
+  
+  // Get the value immediately after setting
+  const immediateValue = rawSheet.getRange(testRow, 1).getValue();
+  console.log("📊 Immediate value after setting: " + immediateValue);
+  
+  // Wait a moment and check again
+  Utilities.sleep(2000);
+  const delayedValue = rawSheet.getRange(testRow, 1).getValue();
+  console.log("📊 Value after 2 second delay: " + delayedValue);
+  
+  // Try writing with different format
+  console.log("🧪 Testing with different format...");
+  const formattedTimestamp = Utilities.formatDate(testTimestamp, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
+  rawSheet.getRange(testRow, 1).setValue(formattedTimestamp);
+  
+  Utilities.sleep(2000);
+  const finalValue = rawSheet.getRange(testRow, 1).getValue();
+  console.log("📊 Final value after formatted write: " + finalValue);
+  
+  // Check display values vs actual values
+  const displayValue = rawSheet.getRange(testRow, 1).getDisplayValue();
+  console.log("📝 Display value: " + displayValue);
+  const actualValue = rawSheet.getRange(testRow, 1).getValue();
+  console.log("📝 Actual value: " + actualValue);
+  
+  // Check sheet triggers
+  const triggers = ScriptApp.getProjectTriggers();
+  console.log("⚙️ Checking for triggers that might interfere:");
+  for (const trigger of triggers) {
+    console.log(" - " + trigger.getHandlerFunction() + " (event: " + trigger.getEventType() + ")");
+  }
+  
+  // Check if column is hidden
+  const isHidden = rawSheet.isColumnHidden(1);
+  console.log("👀 Column A hidden? " + isHidden);
+  
+  // Get sample timestamps from form responses
+  const formData = formSheet.getRange("A2:A10").getValues();
+  console.log("📅 Sample timestamps from Form Responses:");
+  for (const row of formData) {
+    if (row[0]) {
+      console.log(" - " + row[0] + " (type: " + typeof row[0] + ")");
+    }
+  }
+}
+
+function fixTimestampDisplay() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet();
+  const rawSheet = sheet.getSheetByName("Form Responses (Raw)");
+  
+  if (!rawSheet) {
+    console.log("Form Responses (Raw) sheet not found");
+    return;
+  }
+  
+  // Get the last row with data
+  const lastRow = rawSheet.getLastRow();
+  if (lastRow <= 1) {
+    console.log("No data rows to fix");
+    return;
+  }
+  
+  // Try different date formats to see which one works
+  console.log("Applying different date formats to make timestamps visible...");
+  
+  // First format - standard date/time
+  rawSheet.getRange(2, 1, lastRow - 1, 1).setNumberFormat("yyyy-mm-dd hh:mm:ss");
+  
+  // Second approach - directly modify the column format
+  const sheet_id = sheet.getSheetId();
+  const column_index = 1; // Column A
+  
+  try {
+    const request = {
+      'requests': [
+        {
+          'updateDimensionProperties': {
+            'properties': {
+              'numberFormat': {
+                'type': 'DATE_TIME',
+                'pattern': 'M/d/yyyy h:mm:ss'
+              }
+            },
+            'fields': 'numberFormat',
+            'range': {
+              'sheetId': sheet_id,
+              'dimension': 'COLUMNS',
+              'startIndex': column_index - 1,
+              'endIndex': column_index
+            }
+          }
+        }
+      ]
+    };
+    
+    Sheets.Spreadsheets.batchUpdate(request, sheet.getId());
+    console.log("Applied column format via API");
+  } catch (e) {
+    console.log("API format update failed: " + e.message);
+    // Fall back to direct formatting
+    rawSheet.getRange("A:A").setNumberFormat("M/d/yyyy h:mm:ss");
+    console.log("Applied fallback formatting method");
+  }
+  
+  // Try refreshing the values by writing them back
+  const timestampValues = rawSheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  rawSheet.getRange(2, 1, lastRow - 1, 1).setValues(timestampValues);
+  console.log("Refreshed timestamp values");
 }
