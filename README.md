@@ -32,3 +32,5 @@ The "Daily Competition" section features Google Forms designed to collect respon
 Each team participating in the competition has a dedicated section showcasing their unique identity. This includes team names, a list of members, and custom icons or logos that represent their spirit and creativity. These icons are stored in the "icons" folder within the project's GitHub repository.
 
 By integrating various Google Workspace tools and custom scripts, the "Nursing Patient Safety March Madness" project creates an engaging and seamless experience for all participants, promoting teamwork and a sense of community within the nursing staff.
+
+Implementation --> go to Implementation.md
