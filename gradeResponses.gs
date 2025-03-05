@@ -1708,54 +1708,76 @@ function fixTextAlignment() {
   }
 }
 
+/**
+ * Creates a combined menu for all functions when the spreadsheet is opened
+ */
 function onOpen() {
-    const ui = SpreadsheetApp.getUi();
-    ui.createMenu('Quiz Admin')
-        // Response Processing Section
-        .addItem('Process Pending Responses', 'processQueue')
-        .addItem('Flush All Pending Responses', 'flushQueue')
-        .addItem('Grade Responses', 'gradeResponses')
-        .addItem('Sync Responses', 'syncResponses')
-        .addSeparator()
-        
-        // Leaderboard & Scores Section
-        .addItem('Update Leaderboard', 'updateLeaderboard')
-        .addSeparator()
-        
-        // Manual Points Management
-        .addItem('Add Manual Points', 'showManualPointsDialog')
-        .addItem('Process Manual Form Grades', 'handleFormGradeOverride')
-        .addItem('Setup Manual Grade Processing Log', 'setupManualGradeProcessingLog')
-        .addItem('Recover Bonus Points', 'recoverBonusPoints')
-        .addSeparator()
-        
-        // Maintenance Section
-        .addItem('Fix Timestamp Display', 'fixTimestampDisplay')
-        .addItem('Check Timestamps', 'checkForTimestamps')
-        .addItem('Clean Duplicate Responses', 'cleanupProcessedResponses')
-        .addItem('Fix Formatting & Alignment', 'fixAllSheetFormatting')
-        .addSeparator()
-        
-        // Question Management
-        .addItem('Update Daily Questions', 'updateDailyQuestions')
-        .addItem('Reset Daily Questions Trigger', 'resetDailyQuestionsTrigger')
-        .addSeparator()
-        
-        // Competition Management
-        .addItem('Determine Weekly Winners', 'testDetermineWinners')
-        .addSeparator()
-        
-        // Administrative Section
-        .addItem('Reset All Scores', 'resetAllScores')
-        .addItem('Clear Audit Log', 'clearAuditLog')
-        .addItem('Archive Old Audit Data', 'archiveOldData')
-        .addSeparator()
-        
-        // Testing & Configuration
-        .addItem('Add Test Data (10 Entries)', 'addTestData')
-        .addItem('Clear Caches', 'clearCaches')
-        .addItem('Setup Automatic Processing', 'setupTriggers')
-        .addToUi();
+  const ui = SpreadsheetApp.getUi();
+  
+  // Create Quiz Admin menu (main menu)
+  const quizMenu = ui.createMenu('Quiz Admin')
+    // Response Processing Section
+    .addItem('Process Pending Responses', 'processQueue')
+    .addItem('Flush All Pending Responses', 'flushQueue')
+    .addItem('Grade Responses', 'gradeResponses')
+    .addItem('Sync Responses', 'syncResponses')
+    .addSeparator()
+    
+    // Leaderboard & Scores Section
+    .addItem('Update Leaderboard', 'updateLeaderboard')
+    .addSeparator()
+    
+    // Manual Points Management
+    .addItem('Add Manual Points', 'showManualPointsDialog')
+    .addItem('Process Manual Form Grades', 'handleFormGradeOverride')
+    .addItem('Setup Manual Grade Processing Log', 'setupManualGradeProcessingLog')
+    .addItem('Recover Bonus Points', 'recoverBonusPoints')
+    .addSeparator()
+    
+    // Maintenance Section
+    .addItem('Fix Timestamp Display', 'fixTimestampDisplay')
+    .addItem('Check Timestamps', 'checkForTimestamps')
+    .addItem('Clean Duplicate Responses', 'cleanupProcessedResponses')
+    .addItem('Fix Formatting & Alignment', 'fixAllSheetFormatting')
+    .addSeparator()
+    
+    // Question Management
+    .addItem('Update Daily Questions', 'updateDailyQuestions')
+    .addItem('Reset Daily Questions Trigger', 'resetDailyQuestionsTrigger')
+    .addSeparator()
+    
+    // Competition Management
+    .addItem('Determine Weekly Winners', 'testDetermineWinners')
+    .addSeparator()
+    
+    // Administrative Section
+    .addItem('Reset All Scores', 'resetAllScores')
+    .addItem('Clear Audit Log', 'clearAuditLog')
+    .addItem('Archive Old Audit Data', 'archiveOldData')
+    .addSeparator()
+    
+    // Testing & Configuration
+    .addItem('Add Test Data (10 Entries)', 'addTestData')
+    .addItem('Clear Caches', 'clearCaches')
+    .addItem('Setup Automatic Processing', 'setupTriggers');
+  
+  // Create Backup submenu
+  const backupMenu = ui.createMenu('Backup')
+    .addItem('Create Backup Now', 'createSpreadsheetBackup')
+    .addItem('List All Backups', 'listBackups')
+    .addSeparator()
+    .addItem('Set Custom Backup Folder', 'setBackupFolder')
+    .addItem('Reset to Default Backup Folder', 'resetBackupFolder')
+    .addSeparator()
+    .addItem('Schedule Daily Backups', 'createDailyBackupTrigger')
+    .addItem('Schedule Weekly Backups', 'createWeeklyBackupTrigger')
+    .addItem('Remove Backup Schedule', 'removeBackupTriggers');
+  
+  // Add the backup submenu to the Quiz Admin menu
+  quizMenu.addSubMenu(backupMenu);
+  
+  // Add the main menu to the UI
+  quizMenu.addToUi();
 }
 
 /**
