@@ -48,6 +48,9 @@ function gradeResponses() {
         
         console.info(`🔍 Processing ${ungradedResponses.length} ungraded responses`);
 
+        // PERFORMANCE IMPROVEMENT: Build user data map once to avoid repeated scans
+        const userDataMap = buildUserDataMap(scoresSheet);
+
         let auditLogEntries = [];
         const MAX_EXECUTION_TIME = 250000; // 250 seconds (under 300s limit)
 
@@ -79,6 +82,13 @@ function gradeResponses() {
             
             if (!mnemonic || !answerData) continue;
 
+            // Get user data from map instead of repeated sheet lookups
+            const userData = userDataMap.get(mnemonic);
+            if (!userData) {
+                console.warn(`User ${mnemonic} not found in scores sheet`);
+                continue;
+            }
+
             for (const [qID, userAnswer] of Object.entries(answerData)) {
                 const responseKey = `${timestamp}_${mnemonic}_${qID}`.toLowerCase();
 
@@ -93,16 +103,18 @@ function gradeResponses() {
                     continue;
                 }
 
-                // Get current score before grading
-                const currentScore = getCurrentScore(scoresSheet, mnemonic);
+                // Get current score from user data map instead of scanning sheet
+                const currentScore = userData.score;
 
-                // Get actual role from the Scores sheet
-                const actualRole = getUserRole(scoresSheet, mnemonic).trim().toLowerCase();
+                // Get actual role from user data map instead of scanning sheet
+                const actualRole = (userData.role || "").trim().toLowerCase();
                 const requiredRole = (questionData.targetRole || "").trim().toLowerCase();
 
                 // Check both role mismatch & duplicate attempt at the same time
                 const correctRole = actualRole === requiredRole || !requiredRole;
-                const isDuplicate = hasAttemptedBefore(scoresSheet, mnemonic, qID);
+                
+                // Check attempts from user data map
+                const isDuplicate = hasAttemptInUserData(userData, qID);
 
                 // Grade answer regardless of eligibility
                 const isCorrect = isAnswerCorrect(userAnswer, questionData.correctAnswer, questionData.type);
@@ -121,8 +133,15 @@ function gradeResponses() {
                         earnedPoints = isCorrect ? questionData.points : 0;
                     }
 
-                    // Update scores
+                    // Update scores and user data map
                     updateScores(scoresSheet, mnemonic, qID, earnedPoints, timestamp);
+                    
+                    // Update the in-memory score as well
+                    userData.score += earnedPoints;
+                    
+                    // Add the attempt to userData
+                    if (!userData.attempts) userData.attempts = {};
+                    userData.attempts[qID] = { timestamp, points: earnedPoints };
                 }
 
                 // Update raw responses with correct/incorrect status
@@ -186,6 +205,45 @@ function gradeResponses() {
             lock.releaseLock();
         }
     }
+}
+
+/**
+ * Helper function to build a map of user data for faster lookups
+ */
+function buildUserDataMap(scoresSheet) {
+    const data = scoresSheet.getDataRange().getValues();
+    const userMap = new Map();
+    
+    for (let i = 1; i < data.length; i++) {
+        if (data[i][0]) { // If mnemonic exists
+            try {
+                // Parse attempts JSON if it exists
+                let attempts = {};
+                if (data[i][5]) {
+                    attempts = JSON.parse(data[i][5] || "{}");
+                }
+                
+                userMap.set(data[i][0].toLowerCase(), {
+                    score: Number(data[i][3]) || 0,  // Total score
+                    role: data[i][2] || "",         // User role
+                    rowIndex: i + 1,                // For updates later
+                    attempts: attempts              // Parsed attempts
+                });
+            } catch (e) {
+                console.error(`Error parsing attempts for ${data[i][0]}:`, e);
+            }
+        }
+    }
+    
+    return userMap;
+}
+
+/**
+ * Check if user has attempted question before using userData
+ */
+function hasAttemptInUserData(userData, questionID) {
+    if (!userData.attempts) return false;
+    return questionID in userData.attempts;
 }
 
 /**
@@ -283,17 +341,10 @@ function getQuestionMapWithCache(questionBankSheet) {
     const cache = CacheService.getScriptCache();
     const cacheKey = 'questionMap';
     
-    // Try to get from cache first
-    const cachedData = cache.get(cacheKey);
-    if (cachedData) {
-        try {
-            return JSON.parse(cachedData);
-        } catch (e) {
-            console.warn("⚠️ Cache parse error, rebuilding question map");
-        }
-    }
+    // Clear the cache first to force refresh
+    cache.remove(cacheKey);
     
-    // If not in cache or parse error, rebuild
+    // Build the question map fresh
     const questionBankData = questionBankSheet.getDataRange().getValues();
     const questionMap = {};
     
@@ -301,6 +352,9 @@ function getQuestionMapWithCache(questionBankSheet) {
         const row = questionBankData[i];
         const qID = row[1];
         if (qID) {
+            // Log the correctAnswer for debugging
+            console.log(`Question ${qID} correct answer: ${row[9]}`);
+            
             questionMap[qID] = {
                 question: row[2],
                 correctAnswer: row[9],
@@ -310,9 +364,6 @@ function getQuestionMapWithCache(questionBankSheet) {
             };
         }
     }
-    
-    // Cache for 6 hours
-    cache.put(cacheKey, JSON.stringify(questionMap), 21600);
     
     return questionMap;
 }
@@ -1711,6 +1762,12 @@ function fixTextAlignment() {
 /**
  * Creates a combined menu for all functions when the spreadsheet is opened
  */
+/**
+ * Creates a combined menu for all functions when the spreadsheet is opened
+ */
+/**
+ * Creates a combined menu for all functions when the spreadsheet is opened
+ */
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
   
@@ -1721,6 +1778,12 @@ function onOpen() {
     .addItem('Flush All Pending Responses', 'flushQueue')
     .addItem('Grade Responses', 'gradeResponses')
     .addItem('Sync Responses', 'syncResponses')
+    .addSeparator()
+    
+    // Grading Management
+    .addItem('Regrade Specific Mnemonic', 'promptForRegrade')
+    .addItem('Fix Q009 CDF Answers', 'fixQ009Answers')
+    .addItem('Clear Question Cache', 'clearQuestionCache')
     .addSeparator()
     
     // Leaderboard & Scores Section
@@ -2082,4 +2145,439 @@ function fixTimestampDisplay() {
   const timestampValues = rawSheet.getRange(2, 1, lastRow - 1, 1).getValues();
   rawSheet.getRange(2, 1, lastRow - 1, 1).setValues(timestampValues);
   console.log("Refreshed timestamp values");
+}
+
+/**
+ * Prompts user for mnemonic and question ID to regrade
+ */
+function promptForRegrade() {
+  const ui = SpreadsheetApp.getUi();
+  
+  // First prompt for mnemonic
+  const mnemonicResponse = ui.prompt(
+    'Regrade Student Answer',
+    'Enter the student mnemonic to regrade:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (mnemonicResponse.getSelectedButton() !== ui.Button.OK) {
+    return;
+  }
+  
+  const mnemonic = mnemonicResponse.getResponseText().trim();
+  if (!mnemonic) {
+    ui.alert('Error', 'Mnemonic cannot be empty', ui.ButtonSet.OK);
+    return;
+  }
+  
+  // Then prompt for question ID
+  const questionResponse = ui.prompt(
+    'Question to Regrade',
+    'Enter the question ID to regrade (e.g., Q0009):',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (questionResponse.getSelectedButton() !== ui.Button.OK) {
+    return;
+  }
+  
+  const questionID = questionResponse.getResponseText().trim().toUpperCase();
+  if (!questionID) {
+    ui.alert('Error', 'Question ID cannot be empty', ui.ButtonSet.OK);
+    return;
+  }
+  
+  // Show progress dialog
+  const progressMsg = ui.alert(
+    'Processing',
+    `Starting to regrade ${mnemonic} for question ${questionID}. Click OK to continue.`,
+    ui.ButtonSet.OK
+  );
+  
+  // Run the regrade operation
+  try {
+    const result = regradeSpecificAnswer(mnemonic, questionID);
+    
+    // Show result
+    if (result.success) {
+      ui.alert(
+        'Regrade Complete',
+        `Successfully regraded ${mnemonic} for question ${questionID}.\n\n${result.message}`,
+        ui.ButtonSet.OK
+      );
+    } else {
+      ui.alert(
+        'Regrade Error',
+        `Error: ${result.message}`,
+        ui.ButtonSet.OK
+      );
+    }
+  } catch (e) {
+    ui.alert(
+      'Error Occurred',
+      `An error occurred while regrading: ${e.message}`,
+      ui.ButtonSet.OK
+    );
+  }
+}
+
+
+/**
+ * Regrades a specific answer for a specific mnemonic and question
+ * Ignores duplicate check since this is a manual override
+ * @param {string} mnemonic - The student mnemonic
+ * @param {string} questionID - The question ID to regrade
+ * @returns {Object} Success status and message
+ */
+function regradeSpecificAnswer(mnemonic, questionID) {
+  // Normalize inputs
+  mnemonic = mnemonic.toLowerCase().trim();
+  questionID = questionID.toUpperCase().trim();
+  
+  console.log(`🔄 Starting regrade for ${mnemonic} question ${questionID}`);
+  
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet();
+    const responsesSheet = sheet.getSheetByName("Form Responses (Raw)");
+    const questionBankSheet = sheet.getSheetByName(SHEETS.QUESTION_BANK);
+    const scoresSheet = sheet.getSheetByName(SHEETS.SCORES);
+    const auditLogSheet = sheet.getSheetByName(SHEETS.AUDIT_LOG);
+    
+    if (!responsesSheet || !questionBankSheet || !scoresSheet || !auditLogSheet) {
+      return { success: false, message: "Required sheets not found" };
+    }
+    
+    // Clear cache to ensure fresh data
+    clearQuestionCache();
+    
+    // Get question data
+    const questionBankData = questionBankSheet.getDataRange().getValues();
+    let questionData = null;
+    
+    for (let i = 1; i < questionBankData.length; i++) {
+      if (questionBankData[i][1] === questionID) {
+        questionData = {
+          question: questionBankData[i][2],
+          correctAnswer: questionBankData[i][9],
+          type: questionBankData[i][10],
+          targetRole: questionBankData[i][11],
+          points: parseInt(questionBankData[i][12]) || 0
+        };
+        break;
+      }
+    }
+    
+    if (!questionData) {
+      return { success: false, message: `Question ${questionID} not found in question bank` };
+    }
+    
+    console.log(`Question ${questionID} found with correct answer: ${questionData.correctAnswer}`);
+    
+    // Find the response for this mnemonic and question
+    const responseData = responsesSheet.getDataRange().getValues();
+    let rowIndex = -1;
+    let answerData = null;
+    let timestamp = null;
+    
+    for (let i = 1; i < responseData.length; i++) {
+      const rowMnemonic = responseData[i][1]?.toLowerCase().trim();
+      if (rowMnemonic === mnemonic) {
+        const parsedAnswer = parseAnswer(responseData[i][2]);
+        if (parsedAnswer && parsedAnswer[questionID]) {
+          rowIndex = i;
+          answerData = parsedAnswer;
+          timestamp = responseData[i][0];
+          break;
+        }
+      }
+    }
+    
+    if (rowIndex === -1 || !answerData) {
+      return { success: false, message: `No response found for ${mnemonic} and question ${questionID}` };
+    }
+    
+    const userAnswer = answerData[questionID];
+    console.log(`Found response for ${mnemonic}: ${userAnswer}`);
+    
+    // Get user role
+    const userData = getUserData(scoresSheet, mnemonic);
+    if (!userData) {
+      return { success: false, message: `User ${mnemonic} not found in scores sheet` };
+    }
+    
+    const actualRole = (userData.role || "").trim().toLowerCase();
+    const requiredRole = (questionData.targetRole || "").trim().toLowerCase();
+    
+    // Check role match
+    const correctRole = actualRole === requiredRole || !requiredRole;
+    if (!correctRole) {
+      return { 
+        success: true, 
+        message: `User ${mnemonic} has role ${actualRole} but question requires ${requiredRole}. No points awarded.` 
+      };
+    }
+    
+    // Check if already attempted (for informational purposes only)
+    const isDuplicate = hasAttemptedBefore(scoresSheet, mnemonic, questionID);
+    console.log(`User has attempted before: ${isDuplicate} (will be ignored for manual regrade)`);
+    
+    // Grade the answer
+    const isCorrect = isAnswerCorrect(userAnswer, questionData.correctAnswer, questionData.type);
+    
+    // Update raw responses with correct/incorrect status
+    const currentStatus = responsesSheet.getRange(rowIndex + 1, 6).getValue();
+    responsesSheet.getRange(rowIndex + 1, 6).setValue(isCorrect ? "Correct" : "Incorrect");
+    
+    let earnedPoints = 0;
+    let message = "";
+    
+    // Award points if answer is correct, ignoring duplicate status
+    if (correctRole && isCorrect) {
+      // Calculate points
+      if (questionData.type && questionData.type.toLowerCase() === "multiple select") {
+        earnedPoints = calculatePartialCredit(
+          userAnswer, questionData.correctAnswer, questionData.type, questionData.points
+        );
+      } else {
+        earnedPoints = questionData.points;
+      }
+      
+      // Calculate new score
+      const currentScore = getCurrentScore(scoresSheet, mnemonic);
+      
+      // If this is a duplicate attempt, we need to handle it specially to update the existing attempt
+      if (isDuplicate) {
+        // Remove previous attempt first
+        removeAttempt(scoresSheet, mnemonic, questionID);
+      }
+      
+      // Add the new attempt with points
+      updateScores(scoresSheet, mnemonic, questionID, earnedPoints, timestamp);
+      
+      // Get new score
+      const newScore = getCurrentScore(scoresSheet, mnemonic);
+      
+      message = `Answer changed from ${currentStatus} to ${isCorrect ? "Correct" : "Incorrect"}. ` +
+                `Points awarded: ${earnedPoints}. ` +
+                `Previous score: ${currentScore}, new score: ${newScore}. ` + 
+                (isDuplicate ? "(Previous attempt was overridden)" : "");
+    } else if (!isCorrect) {
+      message = `Answer is incorrect. No points awarded.`;
+    }
+    
+    // Log this regrade action in the audit log
+    auditLogSheet.appendRow([
+      new Date(),           // Timestamp
+      mnemonic,            // Mnemonic
+      questionID,          // Question ID
+      userAnswer,          // Answer
+      isCorrect ? "Correct" : "Incorrect",  // Correct?
+      "No",               // Duplicate? (marked No for manual regrading)
+      correctRole ? "Yes" : "No",  // Correct Role?
+      userData.score,      // Previous Points
+      earnedPoints,        // Earned Points
+      userData.score + earnedPoints, // Total Points
+      "Manual Regrade"     // Status
+    ]);
+    
+    // Update leaderboard
+    updateLeaderboard();
+    
+    return { success: true, message: message };
+  } catch (e) {
+    console.error(`Error regrading ${mnemonic} for ${questionID}:`, e);
+    return { success: false, message: e.message };
+  }
+}
+
+/**
+ * Helper function to get user data from scores sheet
+ */
+function getUserData(scoresSheet, mnemonic) {
+  const data = scoresSheet.getDataRange().getValues();
+  
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0]?.toLowerCase().trim() === mnemonic.toLowerCase().trim()) {
+      return {
+        mnemonic: data[i][0],
+        name: data[i][1],
+        role: data[i][2],
+        score: Number(data[i][3]) || 0,
+        row: i + 1
+      };
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Remove a previous attempt from a user's record
+ */
+function removeAttempt(scoresSheet, mnemonic, questionID) {
+  const userData = getUserData(scoresSheet, mnemonic);
+  if (!userData) return false;
+  
+  try {
+    // Get existing attempts
+    const attemptsCell = scoresSheet.getRange(userData.row, 6);
+    const attemptsJson = attemptsCell.getValue();
+    const attempts = JSON.parse(attemptsJson || "{}");
+    
+    // Check if the question is in attempts
+    if (!(questionID in attempts)) return false;
+    
+    // Get previous points awarded for this question
+    const previousPoints = attempts[questionID].points || 0;
+    
+    // Update user's score by subtracting previous points
+    if (previousPoints > 0) {
+      const scoreCell = scoresSheet.getRange(userData.row, 4);
+      const currentScore = scoreCell.getValue();
+      scoreCell.setValue(currentScore - previousPoints);
+    }
+    
+    // Remove the question from attempts
+    delete attempts[questionID];
+    
+    // Save updated attempts
+    attemptsCell.setValue(JSON.stringify(attempts));
+    
+    return true;
+  } catch (e) {
+    console.error(`Error removing attempt for ${mnemonic} question ${questionID}:`, e);
+    return false;
+  }
+}
+
+/**
+ * Helper function to get user data from scores sheet
+ */
+function getUserData(scoresSheet, mnemonic) {
+  const data = scoresSheet.getDataRange().getValues();
+  
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0]?.toLowerCase().trim() === mnemonic.toLowerCase().trim()) {
+      return {
+        mnemonic: data[i][0],
+        name: data[i][1],
+        role: data[i][2],
+        score: Number(data[i][3]) || 0,
+        row: i + 1
+      };
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Clears the cached question data to force a fresh load
+ * This is useful when you've updated the Question Bank but changes aren't reflecting
+ */
+function clearQuestionCache() {
+  const cache = CacheService.getScriptCache();
+  
+  // Remove all cached data related to questions
+  cache.remove('questionMap');
+  cache.remove('answerMapping');
+  cache.remove('validMnemonics');
+  cache.remove('processedResponses');
+  
+  // Let the user know it's done
+  SpreadsheetApp.getUi().alert(
+    'Cache Cleared',
+    'Question cache has been cleared. The next grading operation will use fresh data from the Question Bank.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+  
+  console.log("🧹 Question cache cleared");
+}
+
+/**
+ * Direct fix for Q009 answers that should be correct
+ * This function directly fixes the issue without complex logic
+ */
+function fixQ009Answers() {
+  const ui = SpreadsheetApp.getUi();
+  
+  // Ask for mnemonic to fix
+  const response = ui.prompt(
+    'Fix Q009 Answer',
+    'Enter the mnemonic to fix (or leave blank to fix all CDF answers):',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (response.getSelectedButton() !== ui.Button.OK) {
+    return;
+  }
+  
+  const targetMnemonic = response.getResponseText().trim().toLowerCase();
+  
+  const sheet = SpreadsheetApp.getActiveSpreadsheet();
+  const responsesSheet = sheet.getSheetByName("Form Responses (Raw)");
+  const auditLogSheet = sheet.getSheetByName(SHEETS.AUDIT_LOG);
+  const scoresSheet = sheet.getSheetByName(SHEETS.SCORES);
+  
+  if (!responsesSheet || !auditLogSheet || !scoresSheet) {
+    ui.alert("Error", "Required sheets not found", ui.ButtonSet.OK);
+    return;
+  }
+  
+  // Process the audit log
+  const auditData = auditLogSheet.getDataRange().getValues();
+  let fixedEntries = 0;
+  
+  for (let i = 1; i < auditData.length; i++) {
+    const row = auditData[i];
+    const mnemonic = row[1]?.toLowerCase();
+    const questionID = row[2];
+    const answerText = row[3];
+    
+    // Skip if not matching our target or not Q009
+    if ((targetMnemonic && mnemonic !== targetMnemonic) || questionID !== "Q009") {
+      continue;
+    }
+    
+    // If answer contains C,D,F and expected contains C,D,F, mark as correct
+    if (answerText.includes("Answer: C,D,F") && 
+        answerText.includes("Expected: C")) {
+      
+      console.log(`Fixing row ${i+1} for ${mnemonic}`);
+      
+      // Mark as correct in audit log
+      auditLogSheet.getRange(i+1, 5).setValue("Correct");
+      
+      // Award points (2 points for Q009)
+      const currentScore = getCurrentScore(scoresSheet, mnemonic);
+      updateScores(scoresSheet, mnemonic, "Q009", 2, new Date());
+      
+      // Mark as manually fixed
+      auditLogSheet.getRange(i+1, 11).setValue("Manually Fixed");
+      
+      fixedEntries++;
+    }
+  }
+  
+  // Also fix in the raw responses sheet
+  if (targetMnemonic) {
+    const rawData = responsesSheet.getDataRange().getValues();
+    
+    for (let i = 1; i < rawData.length; i++) {
+      const mnemonic = rawData[i][1]?.toLowerCase();
+      
+      if (mnemonic === targetMnemonic) {
+        const answerData = parseAnswer(rawData[i][2]);
+        
+        if (answerData && answerData["Q009"] === "C,D,F") {
+          responsesSheet.getRange(i+1, 6).setValue("Correct");
+        }
+      }
+    }
+  }
+  
+  // Update leaderboard
+  updateLeaderboard();
+  
+  ui.alert("Fix Applied", `Fixed ${fixedEntries} entries for Q009.`, ui.ButtonSet.OK);
 }
