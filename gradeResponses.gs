@@ -1,5 +1,5 @@
 /**
- * Main grading function with optimizations
+ * Main grading function with optimizations, smart comma handling, and partial correctness
  */
 function gradeResponses() {
     // Use lock service to prevent concurrent execution
@@ -34,6 +34,9 @@ function gradeResponses() {
         // Get question data with caching
         const questionMap = getQuestionMapWithCache(questionBankSheet);
         const answerMapping = getAnswerMappingWithCache(questionMap);
+        
+        // NEW: Get options map for smart comma handling
+        const optionsMap = getOptionsMapWithCache(questionBankSheet);
         
         // Get valid mnemonics with caching
         const validMnemonics = getValidMnemonicsWithCache(scoresSheet);
@@ -116,19 +119,39 @@ function gradeResponses() {
                 // Check attempts from user data map
                 const isDuplicate = hasAttemptInUserData(userData, qID);
 
-                // Grade answer regardless of eligibility
-                const isCorrect = isAnswerCorrect(userAnswer, questionData.correctAnswer, questionData.type);
+                // UPDATED: Get options for this question for smart comma handling
+                const questionOptions = optionsMap[qID] || [];
+
+                // UPDATED: Variables to track correctness and partial credit
+                const isMultipleSelect = questionData.type && questionData.type.toLowerCase() === "multiple select";
+                let isCorrect = false;
+                let isPartiallyCorrect = false;
                 let earnedPoints = 0;
+
+                // Grade the answer
+                isCorrect = isAnswerCorrect(
+                    userAnswer, 
+                    questionData.correctAnswer, 
+                    questionData.type,
+                    questionOptions
+                );
 
                 // Only award points if eligible (correct role and not duplicate)
                 if (correctRole && !isDuplicate) {
-                    if (questionData.type && questionData.type.toLowerCase() === "multiple select") {
+                    if (isMultipleSelect) {
+                        // Calculate partial credit for multiple select
                         earnedPoints = calculatePartialCredit(
                             userAnswer,
                             questionData.correctAnswer,
                             questionData.type,
-                            questionData.points
+                            questionData.points,
+                            questionOptions
                         );
+                        
+                        // Check if this is partially correct (some points but not full)
+                        if (earnedPoints > 0 && earnedPoints < questionData.points) {
+                            isPartiallyCorrect = true;
+                        }
                     } else {
                         earnedPoints = isCorrect ? questionData.points : 0;
                     }
@@ -144,8 +167,19 @@ function gradeResponses() {
                     userData.attempts[qID] = { timestamp, points: earnedPoints };
                 }
 
+                // Determine correctness display status for audit log
+                let correctnessStatus;
+                if (isPartiallyCorrect) {
+                    correctnessStatus = "Partially Correct";
+                } else if (isCorrect) {
+                    correctnessStatus = "Correct";
+                } else {
+                    correctnessStatus = "Incorrect";
+                }
+
                 // Update raw responses with correct/incorrect status
-                responsesSheet.getRange(rowIndex + 1, 6).setValue(isCorrect ? "Correct" : "Incorrect");
+                // For the response sheet, we'll still use binary Correct/Incorrect
+                responsesSheet.getRange(rowIndex + 1, 6).setValue(isCorrect || isPartiallyCorrect ? "Correct" : "Incorrect");
 
                 // Get shortened answers for display
                 let formattedUserAnswer = getAnswerLetters(userAnswer, qID, answerMapping);
@@ -154,13 +188,13 @@ function gradeResponses() {
                 // Short display version for audit log
                 const answerDisplay = `Answer: ${shortenAnswerText(formattedUserAnswer)} (Expected: ${shortenAnswerText(formattedCorrectAnswer)})`;
 
-                // Log to audit with new column structure
+                // Log to audit with new column structure and updated correctness status
                 auditLogEntries.push([
                     timestamp,                    // Timestamp
                     mnemonic,                    // Mnemonic
                     qID,                         // Question ID
                     answerDisplay,               // Shortened answer
-                    isCorrect ? "Correct" : "Incorrect",  // Correct? (now shows regardless of status)
+                    correctnessStatus,           // UPDATED: Now shows "Partially Correct" when applicable
                     isDuplicate ? "Yes" : "No",  // Duplicate Attempt?
                     correctRole ? "Yes" : "No",  // Correct Role?
                     currentScore,                // Previous Points
@@ -187,8 +221,8 @@ function gradeResponses() {
             appendToAuditLog(auditLogSheet, auditLogEntries);
         }
 
-        // Update audit log formatting
-        updateAuditLogFormatting();
+        // Update audit log formatting with new conditional formatting for "Partially Correct"
+        updateAuditLogFormattingWithPartialCorrect();
         
         // Update leaderboards
         updateLeaderboard();
@@ -205,6 +239,108 @@ function gradeResponses() {
             lock.releaseLock();
         }
     }
+}
+
+/**
+ * Update audit log formatting, including special formatting for "Partially Correct"
+ */
+function updateAuditLogFormattingWithPartialCorrect() {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const auditSheet = ss.getSheetByName(SHEETS.AUDIT_LOG);
+    
+    if (!auditSheet) return;
+    
+    // Only update formatting periodically to avoid excess API calls
+    const props = PropertiesService.getScriptProperties();
+    const lastFormatTime = props.getProperty('lastAuditFormatTime');
+    const now = new Date().getTime();
+    
+    if (lastFormatTime && now - parseInt(lastFormatTime) < 300000) { // 5 minutes
+        return; // Skip if formatted recently
+    }
+    
+    // Clear existing rules
+    auditSheet.clearConditionalFormatRules();
+    
+    // Get last row
+    const lastRow = Math.max(auditSheet.getLastRow(), 1);
+    
+    // Create rules array
+    const rules = [];
+    
+    // Status column (column K or 11)
+    const statusColumn = 11;
+    const statusRange = auditSheet.getRange(2, statusColumn, lastRow - 1, 1);
+    
+    // Correctness column (column E or 5)
+    const correctnessColumn = 5;
+    const correctnessRange = auditSheet.getRange(2, correctnessColumn, lastRow - 1, 1);
+    
+    // Duplicate attempts - yellow
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+        .whenTextContains("Duplicate")
+        .setBackground("#FFF2CC")
+        .setRanges([statusRange])
+        .build());
+    
+    // Role mismatch - orange
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+        .whenTextContains("Role Mismatch")
+        .setBackground("#FCE5CD")
+        .setRanges([statusRange])
+        .build());
+    
+    // Processed - green
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+        .whenTextContains("Processed")
+        .setBackground("#D9EAD3")
+        .setRanges([statusRange])
+        .build());
+    
+    // Manual addition - blue
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+        .whenTextContains("Manual")
+        .setBackground("#CFE2F3")
+        .setRanges([statusRange])
+        .build());
+    
+    // Errors - red
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+        .whenTextContains("Error")
+        .setBackground("#F4CCCC")
+        .setRanges([statusRange])
+        .build());
+    
+    // NEW: Format for correctness column
+    // Correct - green
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+        .whenTextEqualTo("Correct")
+        .setBackground("#D9EAD3")
+        .setFontColor("#38761d")
+        .setRanges([correctnessRange])
+        .build());
+    
+    // Partially Correct - light green/yellow
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+        .whenTextEqualTo("Partially Correct")
+        .setBackground("#E7F1D7") // lighter green
+        .setFontColor("#7F6000")  // dark yellow/gold
+        .setRanges([correctnessRange])
+        .build());
+    
+    // Incorrect - light red
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+        .whenTextEqualTo("Incorrect")
+        .setBackground("#F4CCCC")
+        .setFontColor("#990000")
+        .setRanges([correctnessRange])
+        .build());
+    
+    // Apply all rules
+    auditSheet.setConditionalFormatRules(rules);
+    
+    // Store last format time
+    props.setProperty('lastAuditFormatTime', now.toString());
 }
 
 /**
@@ -371,7 +507,8 @@ function getQuestionMapWithCache(questionBankSheet) {
 /**
  * Get answer mapping with caching
  */
-function getAnswerMappingWithCache(questionMap) {
+/**
+ * is function getAnswerMappingWithCache(questionMap) {
     const cache = CacheService.getScriptCache();
     const cacheKey = 'answerMapping';
     
@@ -420,6 +557,7 @@ function getAnswerMappingWithCache(questionMap) {
     
     return answerMapping;
 }
+*/
 
 /**
  * Get valid mnemonics with caching
@@ -1174,7 +1312,7 @@ function processBatchFromQueue(indices, queueSheet, queueData) {
 }
 
 /**
- * Grade responses for a specific mnemonic with retry
+ * Grade responses for a specific mnemonic with smart comma handling
  */
 function gradeResponsesForMnemonic(mnemonic) {
     // Check if mnemonic is valid
@@ -1188,9 +1326,12 @@ function gradeResponsesForMnemonic(mnemonic) {
     try {
         const sheet = SpreadsheetApp.getActiveSpreadsheet();
         const responsesSheet = sheet.getSheetByName("Form Responses (Raw)");
+        const questionBankSheet = sheet.getSheetByName(SHEETS.QUESTION_BANK);
+        const scoresSheet = sheet.getSheetByName(SHEETS.SCORES);
+        const auditLogSheet = sheet.getSheetByName(SHEETS.AUDIT_LOG);
         
-        if (!responsesSheet) {
-            console.error("❌ Missing Form Responses (Raw) sheet");
+        if (!responsesSheet || !questionBankSheet || !scoresSheet || !auditLogSheet) {
+            console.error("❌ Missing required sheets for grading");
             return;
         }
         
@@ -1214,16 +1355,6 @@ function gradeResponsesForMnemonic(mnemonic) {
         
         console.log(`Found ${rowsToGrade.length} responses to grade for ${mnemonic}`);
         
-        // Grade the responses directly
-        const auditLogSheet = sheet.getSheetByName(SHEETS.AUDIT_LOG);
-        const scoresSheet = sheet.getSheetByName(SHEETS.SCORES);
-        const questionBankSheet = sheet.getSheetByName(SHEETS.QUESTION_BANK);
-        
-        if (!auditLogSheet || !scoresSheet || !questionBankSheet) {
-            console.error("❌ Missing required sheets for grading");
-            return;
-        }
-        
         // Get processed responses
         const processedResponses = getProcessedResponsesWithCache(auditLogSheet);
         
@@ -1231,9 +1362,12 @@ function gradeResponsesForMnemonic(mnemonic) {
         const questionMap = getQuestionMapWithCache(questionBankSheet);
         const answerMapping = getAnswerMappingWithCache(questionMap);
         
-        // Process each ungraded response for this mnemonic
+        // NEW: Get options map for smart comma handling
+        const optionsMap = getOptionsMapWithCache(questionBankSheet);
+        
         let auditLogEntries = [];
         
+        // Process each ungraded response for this mnemonic
         for (const rowIndex of rowsToGrade) {
             const row = data[rowIndex];
             const timestamp = row[0];
@@ -1263,19 +1397,39 @@ function gradeResponsesForMnemonic(mnemonic) {
                 const correctRole = actualRole === requiredRole || !requiredRole;
                 const isDuplicate = hasAttemptedBefore(scoresSheet, mnemonic, qID);
                 
-                // Grade answer
-                const isCorrect = isAnswerCorrect(userAnswer, questionData.correctAnswer, questionData.type);
+                // UPDATED: Get options for this question for smart comma handling
+                const questionOptions = optionsMap[qID] || [];
+                
+                // UPDATED: Variables to track correctness and partial credit
+                const isMultipleSelect = questionData.type && questionData.type.toLowerCase() === "multiple select";
+                let isCorrect = false;
+                let isPartiallyCorrect = false;
                 let earnedPoints = 0;
                 
-                // Award points if eligible
+                // UPDATED: Grade answer using smart comma handling
+                isCorrect = isAnswerCorrect(
+                    userAnswer, 
+                    questionData.correctAnswer, 
+                    questionData.type,
+                    questionOptions
+                );
+                
+                // Only award points if eligible
                 if (correctRole && !isDuplicate) {
-                    if (questionData.type && questionData.type.toLowerCase() === "multiple select") {
+                    if (isMultipleSelect) {
+                        // UPDATED: Calculate partial credit using smart comma handling
                         earnedPoints = calculatePartialCredit(
                             userAnswer,
                             questionData.correctAnswer,
                             questionData.type,
-                            questionData.points
+                            questionData.points,
+                            questionOptions
                         );
+                        
+                        // Check if this is partially correct (some points but not full)
+                        if (earnedPoints > 0 && earnedPoints < questionData.points) {
+                            isPartiallyCorrect = true;
+                        }
                     } else {
                         earnedPoints = isCorrect ? questionData.points : 0;
                     }
@@ -1284,14 +1438,24 @@ function gradeResponsesForMnemonic(mnemonic) {
                     updateScores(scoresSheet, mnemonic, qID, earnedPoints, timestamp);
                 }
                 
-                // Mark as graded in raw responses
+                // Determine correctness display status for audit log
+                let correctnessStatus;
+                if (isPartiallyCorrect) {
+                    correctnessStatus = "Partially Correct";
+                } else if (isCorrect) {
+                    correctnessStatus = "Correct";
+                } else {
+                    correctnessStatus = "Incorrect";
+                }
+                
+                // Update raw responses with correct/incorrect status
                 retryOperation(() => {
-                    responsesSheet.getRange(rowIndex + 1, 6).setValue(isCorrect ? "Correct" : "Incorrect");
+                    responsesSheet.getRange(rowIndex + 1, 6).setValue(isCorrect || isPartiallyCorrect ? "Correct" : "Incorrect");
                 });
                 
-                // Get shortened answers for display
-                let formattedUserAnswer = getAnswerLetters(userAnswer, qID, answerMapping);
-                let formattedCorrectAnswer = getAnswerLetters(questionData.correctAnswer, qID, answerMapping);
+                // UPDATED: Get shortened answers for display with smart comma handling
+                let formattedUserAnswer = getAnswerLetters(userAnswer, qID, answerMapping, questionOptions);
+                let formattedCorrectAnswer = getAnswerLetters(questionData.correctAnswer, qID, answerMapping, questionOptions);
                 
                 // Short display version for audit log
                 const answerDisplay = `Answer: ${shortenAnswerText(formattedUserAnswer)} (Expected: ${shortenAnswerText(formattedCorrectAnswer)})`;
@@ -1302,8 +1466,8 @@ function gradeResponsesForMnemonic(mnemonic) {
                     mnemonic,                    // Mnemonic
                     qID,                         // Question ID
                     answerDisplay,               // Shortened answer
-                    isCorrect ? "Correct" : "Incorrect",  // Correct?
-                    isDuplicate ? "Yes" : "No",  // Duplicate?
+                    correctnessStatus,           // UPDATED: Now shows "Partially Correct" when applicable
+                    isDuplicate ? "Yes" : "No",  // Duplicate Attempt?
                     correctRole ? "Yes" : "No",  // Correct Role?
                     currentScore,                // Previous Points
                     earnedPoints,                // Earned Points
@@ -1332,7 +1496,7 @@ function gradeResponsesForMnemonic(mnemonic) {
         }
         
         // Update audit log formatting
-        updateAuditLogFormatting();
+        updateAuditLogFormattingWithPartialCorrect();
         
     } catch (e) {
         console.error(`❌ Error processing ${mnemonic}:`, e.message, e.stack);
@@ -1765,9 +1929,6 @@ function fixTextAlignment() {
 /**
  * Creates a combined menu for all functions when the spreadsheet is opened
  */
-/**
- * Creates a combined menu for all functions when the spreadsheet is opened
- */
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
   
@@ -1790,6 +1951,16 @@ function onOpen() {
     .addItem('Update Leaderboard', 'updateLeaderboard')
     .addSeparator()
     
+    // Tournament Management (NEW SECTION)
+    .addItem('Advance to Round 2 (Top 8)', 'advanceToRoundTwo')
+    .addItem('Update Round 2 Scores', 'updateRoundTwoScores')
+    .addItem('Advance to Round 3 (Top 4)', 'advanceToRoundThree')
+    .addItem('Update Round 3 Scores', 'updateRoundThreeScores')
+    .addItem('Advance to Round 4 (Finals)', 'advanceToRoundFour')
+    .addItem('Update Round 4 Scores', 'updateRoundFourScores')
+    .addItem('Determine Champion', 'determineChampion')
+    .addSeparator()
+    
     // Manual Points Management
     .addItem('Add Manual Points', 'showManualPointsDialog')
     .addItem('Process Manual Form Grades', 'handleFormGradeOverride')
@@ -1797,16 +1968,18 @@ function onOpen() {
     .addItem('Recover Bonus Points', 'recoverBonusPoints')
     .addSeparator()
     
+    // Question Management
+    .addItem('Add New Question', 'showQuestionBankEditor')
+    .addItem('Edit Existing Question', 'editExistingQuestion')
+    .addItem('Update Daily Questions', 'updateDailyQuestions')
+    .addItem('Reset Daily Questions Trigger', 'resetDailyQuestionsTrigger')
+    .addSeparator()
+    
     // Maintenance Section
     .addItem('Fix Timestamp Display', 'fixTimestampDisplay')
     .addItem('Check Timestamps', 'checkForTimestamps')
     .addItem('Clean Duplicate Responses', 'cleanupProcessedResponses')
     .addItem('Fix Formatting & Alignment', 'fixAllSheetFormatting')
-    .addSeparator()
-    
-    // Question Management
-    .addItem('Update Daily Questions', 'updateDailyQuestions')
-    .addItem('Reset Daily Questions Trigger', 'resetDailyQuestionsTrigger')
     .addSeparator()
     
     // Competition Management
@@ -1855,7 +2028,8 @@ function fixAllSheetFormatting() {
 /**
  * Get answer letters for display
  */
-function getAnswerLetters(answerText, qID, answerMapping) {
+/**
+ * function getAnswerLetters(answerText, qID, answerMapping) {
     if (!answerText || !answerMapping || !answerMapping[qID]) return answerText;
 
     if (answerText.includes(',')) {
@@ -1872,6 +2046,7 @@ function getAnswerLetters(answerText, qID, answerMapping) {
     const letterCode = answerMapping[qID][answerText.toLowerCase().trim()];
     return letterCode ? letterCode : answerText;
 }
+*/
 
 /**
  * Shorten long answer text for display
@@ -2481,6 +2656,7 @@ function clearQuestionCache() {
   // Remove all cached data related to questions
   cache.remove('questionMap');
   cache.remove('answerMapping');
+  cache.remove('optionsMap');
   cache.remove('validMnemonics');
   cache.remove('processedResponses');
   
