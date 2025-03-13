@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background: #f9f9f9;
+            padding: 20px;
+        }
+        .container {
+            max-width: 600px;
+            margin: auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+        }
+        .comment-box {
+            border: 1px solid #ddd;
+            background: #f9f9f9;
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 8px;
+            text-align: left;
+            display: flex;
+            align-items: center;
+            flex-direction: column;
+        }
+        .comment-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            margin-bottom: 5px;
+        }
+        .name {
+            font-weight: bold;
+            color: #007bff;
+            flex-grow: 1;
+        }
+        .timestamp {
+            font-size: 0.8em;
+            color: #555;
+        }
+        .input-box, select {
+            margin: 10px 0;
+            padding: 10px;
+            width: 100%;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+        button {
+            padding: 10px 15px;
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .icon {
+            width: 40px;
+            height: 40px;
+            object-fit: cover;
+            margin-right: 10px;
+            border-radius: 50%;
+            border: 2px solid #ddd;
+        }
+        .comment-content {
+            flex-grow: 1;
+            width: 100%;
+        }
+    </style>
+    <script>
+        function loadComments() {
+            google.script.run.withSuccessHandler(function(comments) {
+                let container = document.getElementById("comments-container");
+                container.innerHTML = "";
+
+                // Reverse the order so the latest comments appear first
+                comments.reverse();
+
+                comments.forEach(comment => {
+                    let imgUrl = comment.icon || "https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/default_icon.png"; // Use default icon if empty
+
+                    let div = document.createElement("div");
+                    div.classList.add("comment-box");
+                    div.innerHTML = `
+                        <div class="comment-header">
+                            <img class="icon" src="${imgUrl}?t=${new Date().getTime()}" 
+                                 alt="User Icon"
+                                 onerror="this.onerror=null; this.src='https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/default_icon.png';">
+                            <p class="name">${comment.name}</p>
+                            <span class="timestamp">${comment.time}</span>
+                        </div>
+                        <div class="comment-content">
+                            <p>${comment.comment}</p>
+                        </div>`;
+
+                    // Add new comment at the top instead of the bottom
+                    container.prepend(div);
+                });
+            }).getComments();
+        }
+
+        function submitComment() {
+            let name = document.getElementById("name").value.trim();
+            let comment = document.getElementById("comment").value.trim();
+            let icon = document.getElementById("icon").value || "https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/default_icon.png"; // Default icon if no team
+
+            if (!name || !comment) {
+                alert("Please enter your name and comment.");
+                return;
+            }
+
+            document.getElementById("name").value = "";
+            document.getElementById("comment").value = "";
+            google.script.run.withSuccessHandler(loadComments).saveComment(name, comment, icon);
+        }
+
+        window.onload = loadComments;
+    </script>
+</head>
+<body>
+    <div class="container">
+        <h2>🏆 Team Comments</h2>
+        <label for="icon">Select Your Team (Optional):</label>
+        <select id="icon">
+            <option value="">No Team</option> <!-- Allows comments without a team -->
+            <option value="https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/safe_steps_squad.png">Safe Steps Squad</option>
+            <option value="https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/wipe_it_right.png">Wipe It Right</option>
+            <option value="https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/fact_checkers.png">Fact-Checkers</option>
+            <option value="https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/sterile_technique_titans.png">Sterile Technique Titans</option>
+            <option value="https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/reposition_rulers.png">Reposition Rulers</option>
+            <option value="https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/refocus_rangers.png">Refocus Rangers</option>
+            <option value="https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/line_tamers.png">Line Tamers</option>
+            <option value="https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/hand_hygiene_hooligans.png">Hand Hygiene Hooligans</option>
+            <option value="https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/urine_good_hands.png">Urine Good Hands</option>
+            <option value="https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/CLABSI_crusaders.png">CLABSI Crusaders</option>
+            <option value="https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/AIDET_avengers.png">AIDET Avengers</option>
+            <option value="https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/no_ifs_ands_or_butts.png">No Ifs, Ands, or Butts</option>
+            <option value="https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/STAR_power.png">STAR Power</option>
+            <option value="https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/handoff_heroes.png">Handoff Heroes</option>
+            <option value="https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/coachsultants.png">Coachsultants</option>
+            <option value="https://raw.githubusercontent.com/lexthoms411/March-Madness/main/icons/stand_tall_dont_fall.png">Stand Tall, Don’t Fall</option>
+        </select>
+        <input id="name" class="input-box" type="text" placeholder="Enter your name">
+        <textarea id="comment" class="input-box" rows="3" placeholder="Enter your comment"></textarea>
+        <button onclick="submitComment()">Post Comment</button>
+        <div id="comments-container"></div>
+    </div>
+</body>
+</html>
+
+
+
+
+
+
+
