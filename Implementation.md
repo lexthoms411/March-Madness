@@ -76,6 +76,12 @@ The March Madness Quiz system consists of:
 
 2. Add your participants with their mnemonics, names, and roles
 
+3. This sheet will be the primary data source for:
+   - Individual participant scores
+   - Team score calculations
+   - The points lookup interface
+   - Leaderboard rankings
+
 ## Step 4: Set Up the Teams Sheet
 
 1. In the Teams sheet, create headers for:
@@ -85,6 +91,26 @@ The March Madness Quiz system consists of:
 2. Add your teams and their members
    - Each mnemonic should match exactly with the Scores sheet
    - Each team can have multiple members (multiple rows with the same team name)
+
+3. Team names should match the team icon names in the "icons" folder:
+   - Safe Steps Squad
+   - Wipe It Right
+   - Fact-Checkers
+   - Sterile Technique Titans
+   - Reposition Rulers
+   - Refocus Rangers
+   - Line Tamers
+   - Hand Hygiene Hooligans
+   - Urine Good Hands
+   - CLABSI Crusaders
+   - AIDET Avengers
+   - No Ifs, Ands, or Butts
+   - STAR Power
+   - Handoff Heroes
+   - Coachsultants
+   - Stand Tall, Don't Fall
+
+4. These team names will be used in both the comments system and the tournament bracket visualization
 
 ## Step 5: Create the Google Form
 
@@ -130,32 +156,86 @@ The March Madness Quiz system consists of:
 
 ## Step 7: PointsLookup HTML Page
 
-1. Create a new HTML file called `PointsLookup.html` 
+1. Create a new HTML file called `PointsLookup.html` in your Apps Script project
 2. This file will provide a web interface for participants to look up their scores
 3. Implement the HTML with:
    - A search box for entering mnemonics
    - Display areas for showing scores and rankings
    - Styling to match your organization's branding
 
-## Step 8: Set Up Comments Page
+4. The `pointsLookup.gs` script will power this interface by:
+   - Handling search requests
+   - Retrieving participant data from the Scores sheet
+   - Formatting and returning results
+   - Calculating participant rankings
 
-1. Create a second Google Form for comments and feedback
-2. Include fields for:
-   - Participant mnemonic
-   - Comment/feedback text
-   - Rating or satisfaction score (optional)
-   - Category of feedback (optional)
+## Step 8: Set Up Comments System
 
-3. Connect this form to a separate Google Sheet for comments
-4. Create a Google Sites page to:
-   - Embed the comments form
-   - Display approved comments from the sheet
-   - Link to the quiz form
+The comments system allows participants to share feedback and team comments that can be displayed on your Google Site.
 
-5. To embed the comments on a Google Site:
-   - Publish the comments sheet as a web page (File > Share > Publish to web)
-   - On your Google Site, insert an Embed element
-   - Use the published URL with embedded parameters
+### Create Comments Form and Sheet
+
+1. Create a new Google Form named "Comments/Recognitions"
+2. Add the following questions to the form:
+   - Name (Short answer text) - Required
+   - Comment (Long answer text) - Required
+   - Team selection (Optional, Multiple choice with team names)
+
+3. Go to Responses tab in the form editor and click the Google Sheets icon to create a new spreadsheet for storing comments
+4. Name this sheet "Form Responses" when prompted
+
+### Set Up Comments Scripts
+
+1. Open the Google Sheet connected to your comments form
+2. Go to Extensions > Apps Script
+3. Create two new files in the Apps Script editor:
+   - `getComments.gs`: For retrieving and processing comments
+   - `comments.html`: For displaying comments with team icons
+
+4. Copy the code from the GitHub repository for each file
+5. Save the files and authorize the script to access your Google Sheets
+
+### getComments.gs Implementation
+
+This script handles the server-side logic for comment management:
+- Retrieves comments from the sheet
+- Caches results for better performance
+- Saves new comments to the sheet
+- Formats comments for display
+
+### comments.html Implementation
+
+This file provides the front-end interface for comments:
+- Displays all approved comments with team icons
+- Has a form for submitting new comments
+- Allows team selection via dropdown
+- Shows timestamps for each comment
+
+### Team Icons Integration
+
+1. Download the team icons from the GitHub repository's "icons" folder
+2. Upload these icons to your own GitHub repository or other hosting service
+3. In the `comments.html` file, update the icon URLs to point to your hosted icons
+
+4. The comments system uses these icons to identify team members:
+   - Each team has its own unique icon
+   - Icons appear next to comments from team members
+   - The default icon appears for comments without team selection
+
+### Deploy the Comments Web App
+
+1. In the Apps Script editor, click Deploy > New deployment
+2. Select "Web app" as the deployment type
+3. Set "Execute as" to "Me" and "Who has access" to "Anyone"
+4. Click Deploy and copy the web app URL
+
+### Embed Comments in Google Site
+
+1. Create a new page on your Google Site for team comments
+2. Add an Embed element to the page
+3. Paste the deployed web app URL into the embed field
+4. Adjust the height and width as needed
+5. Publish your site to make the comments page accessible
 
 ## Step 9: Set Up Triggers
 
@@ -310,6 +390,13 @@ Provides functions for the points lookup interface:
 - **Google Sites Integration**: Create a Google Sites page and embed your leaderboard sheets
 - **Custom Styling**: Add conditional formatting to your sheets for better visualization
 - **Points Lookup**: Customize the `PointsLookup.html` to match your branding
+
+### Team Icons
+
+- **Custom Icons**: Replace the team icons in the GitHub repository with your own designs
+- **Icon Integration**: Update the icon URLs in `comments.html` to match your hosted icons
+- **Team Branding**: Use consistent team icons across Google Sites pages, comments section, and printed materials
+- **Icon Format**: Icons should be square PNG or SVG images with transparent backgrounds for best results
 
 ## Maintenance
 
