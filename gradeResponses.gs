@@ -1929,6 +1929,16 @@ function fixTextAlignment() {
 /**
  * Creates a combined menu for all functions when the spreadsheet is opened
  */
+/**
+ * Integration code for adding reporting functions to existing onOpen menu
+ * Add this at the end of your reportGenerator.gs file
+ */
+
+/**
+ * This is a modified version of the original onOpen function from gradeResponses.gs
+ * that includes the reporting menu items. Replace your existing onOpen function or
+ * merge this with your existing function.
+ */
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
   
@@ -1951,7 +1961,7 @@ function onOpen() {
     .addItem('Update Leaderboard', 'updateLeaderboard')
     .addSeparator()
     
-    // Tournament Management (NEW SECTION)
+    // Tournament Management
     .addItem('Advance to Round 2 (Top 8)', 'advanceToRoundTwo')
     .addItem('Update Round 2 Scores', 'updateRoundTwoScores')
     .addItem('Advance to Round 3 (Top 4)', 'advanceToRoundThree')
@@ -1980,6 +1990,13 @@ function onOpen() {
     .addItem('Check Timestamps', 'checkForTimestamps')
     .addItem('Clean Duplicate Responses', 'cleanupProcessedResponses')
     .addItem('Fix Formatting & Alignment', 'fixAllSheetFormatting')
+    .addSeparator()
+    
+    // NEW REPORTING SECTION - Added reporting functions here
+    .addItem('Generate Comprehensive Report', 'generateComprehensiveReports')
+    .addItem('Generate Detailed Question Report', 'generateDetailedQuestionReport')
+    .addItem('Export Report as PDF', 'exportReportAsPDF')
+    .addItem('Export Report as Excel', 'exportReportAsExcel')
     .addSeparator()
     
     // Competition Management
@@ -2014,6 +2031,23 @@ function onOpen() {
   
   // Add the main menu to the UI
   quizMenu.addToUi();
+}
+
+/**
+ * Alternative approach if you don't want to replace your entire onOpen function.
+ * This function modifies your existing menu by adding reporting items.
+ * 
+ * To use this, call it from your existing onOpen function right before
+ * you call .addToUi() on your menu.
+ */
+function addReportingItemsToMenu(menu) {
+  // This version assumes 'menu' is your existing Quiz Admin menu
+  return menu
+    .addSeparator()
+    .addItem('Generate Comprehensive Report', 'generateComprehensiveReports')
+    .addItem('Generate Detailed Question Report', 'generateDetailedQuestionReport')
+    .addItem('Export Report as PDF', 'exportReportAsPDF')
+    .addItem('Export Report as Excel', 'exportReportAsExcel');
 }
 
 /**
