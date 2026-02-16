@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Login</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f5f7fa; margin:0; padding:20px; }
+    .card { background:#fff; padding:18px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,.1); max-width:520px; }
+    h2 { margin-top:0; color:#1E407C; }
+    label { display:block; margin-top:12px; font-weight:bold; }
+    input { width:100%; padding:10px; margin-top:6px; border:1px solid #ccc; border-radius:6px; font-size:14px; }
+    button { margin-top:14px; padding:10px 14px; border:0; border-radius:6px; cursor:pointer;
+             background:#1E407C; color:#fff; font-size:14px; }
+    button:hover { background:#15325F; }
+    .status { margin-top:12px; font-weight:bold; }
+    .hint { margin-top:10px; color:#555; font-size:13px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>🏆 Admin Login</h2>
+
+    <label for="email">Email</label>
+    <input id="email" type="email" autocomplete="username" placeholder="your.email@gmail.com">
+
+    <label for="key">Shared Key</label>
+    <input id="key" type="password" autocomplete="current-password" placeholder="Enter your admin key">
+
+    <button onclick="login()">Sign in</button>
+
+    <div id="status" class="status"></div>
+    <div class="hint">
+      If you don’t have your admin key, contact Lex to reset it.
+    </div>
+  </div>
+
+<script>
+  function login() {
+    const email = document.getElementById('email').value.trim();
+    const key = document.getElementById('key').value;
+    const status = document.getElementById('status');
+
+    status.textContent = 'Signing in…';
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        status.textContent = 'Success. Redirecting…';
+        // Send to admin panel (no key in URL)
+        window.top.location.href = '<?= ScriptApp.getService().getUrl() ?>?page=admin';
+      })
+      .withFailureHandler((err) => {
+        status.textContent = 'Login failed: ' + (err.message || err);
+      })
+      .adminLogin({ email, key });
+  }
+</script>
+</body>
+</html>

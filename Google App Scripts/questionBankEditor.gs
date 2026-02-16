@@ -53,6 +53,7 @@ function editExistingQuestion() {
 
 /**
  * Find a question by ID in the Question Bank
+ * Updated to include YouTube URL
  */
 function findQuestionById(questionId) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.QUESTION_BANK);
@@ -80,7 +81,8 @@ function findQuestionById(questionId) {
         type: data[i][10],
         targetRole: data[i][11],
         points: data[i][12],
-        imageUrl: data[i][13] || ''
+        imageUrl: data[i][13] || '',
+        youtubeUrl: data[i][14] || '' // Added YouTube URL
       };
     }
   }
@@ -88,10 +90,9 @@ function findQuestionById(questionId) {
   return null;
 }
 
-
 /**
  * Process the form submission and add/update the question in the Question Bank
- * UPDATED: Fixed timezone issues and improved answer formatting
+ * Updated to include YouTube URL and preserve date handling fix
  */
 function processQuestionForm(formData) {
   try {
@@ -99,19 +100,25 @@ function processQuestionForm(formData) {
     
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.QUESTION_BANK);
     
-    // Format date correctly - FIX: Set to noon to avoid timezone issues
+    // Format date correctly - FIX: Ensure exact date preservation
     let questionDate;
     if (formData.date) {
-      questionDate = new Date(formData.date);
-      // Set to noon local time to avoid date rollover due to timezone
-      questionDate.setHours(12, 0, 0, 0);
+      // Parse the date string and create a date object that preserves the day
+      const dateComponents = formData.date.split('-');
+      const year = parseInt(dateComponents[0]);
+      const month = parseInt(dateComponents[1]) - 1; // JavaScript months are 0-based
+      const day = parseInt(dateComponents[2]);
+      
+      // Create new date directly with components to avoid timezone issues
+      questionDate = new Date(year, month, day, 12, 0, 0);
+      
+      console.log("Date selected in UI:", formData.date);
+      console.log("Date to be stored:", questionDate.toISOString());
     } else {
+      // Default to today at noon
       questionDate = new Date();
       questionDate.setHours(12, 0, 0, 0);
     }
-    
-    console.log("Date selected:", formData.date);
-    console.log("Date to be stored:", questionDate);
     
     // Process correct answers
     let correctAnswer = '';
@@ -158,6 +165,7 @@ function processQuestionForm(formData) {
       sheet.getRange(rowIndex, 12).setValue(formData.targetRole);
       sheet.getRange(rowIndex, 13).setValue(parseInt(formData.points) || 1);
       sheet.getRange(rowIndex, 14).setValue(formData.imageUrl || '');
+      sheet.getRange(rowIndex, 15).setValue(formData.youtubeUrl || ''); // Added YouTube URL
       
       return {
         success: true,
@@ -184,7 +192,8 @@ function processQuestionForm(formData) {
         formData.type,           // Question Type
         formData.targetRole,     // Target Role
         parseInt(formData.points) || 1,  // Points
-        formData.imageUrl || ''  // Image URL
+        formData.imageUrl || '', // Image URL
+        formData.youtubeUrl || '' // YouTube URL
       );
       
       // Append to sheet
@@ -230,7 +239,7 @@ function getNextQuestionId() {
 }
 
 /**
- * Generate the HTML for the Question Bank Editor - Fixed version
+ * Generate the HTML for the Question Bank Editor with YouTube support
  */
 function getQuestionBankEditorHtml(questionData = null) {
   // Get next question ID if this is a new question
@@ -248,7 +257,8 @@ function getQuestionBankEditorHtml(questionData = null) {
       id: questionData.questionId,
       type: questionData.type,
       options: questionData.options,
-      correctAnswer: questionData.correctAnswer
+      correctAnswer: questionData.correctAnswer,
+      youtubeUrl: questionData.youtubeUrl
     }));
   }
   
@@ -374,6 +384,7 @@ function getQuestionBankEditorHtml(questionData = null) {
       <select id="targetRole" name="targetRole" required>
         <option value="RN" ${isEdit && questionData.targetRole === 'RN' ? 'selected' : ''}>RN</option>
         <option value="PCA" ${isEdit && questionData.targetRole === 'PCA' ? 'selected' : ''}>PCA</option>
+        <option value="LPN" ${isEdit && questionData.targetRole === 'LPN' ? 'selected' : ''}>LPN</option>
       </select>
       <div class="help-text">Which role should see this question.</div>
     </div>
@@ -411,6 +422,13 @@ function getQuestionBankEditorHtml(questionData = null) {
       <label for="imageUrl">Image URL (optional):</label>
       <input type="text" id="imageUrl" name="imageUrl" value="${isEdit && questionData.imageUrl ? questionData.imageUrl : ''}">
       <div class="help-text">If the question includes an image, enter its URL here.</div>
+    </div>
+    
+    <!-- New YouTube video field -->
+    <div class="form-group">
+      <label for="youtubeUrl">YouTube Video URL (optional):</label>
+      <input type="text" id="youtubeUrl" name="youtubeUrl" value="${isEdit && questionData.youtubeUrl ? questionData.youtubeUrl : ''}">
+      <div class="help-text">If the question includes a YouTube video, enter the video URL here (e.g., https://www.youtube.com/watch?v=abcdefg).</div>
     </div>
     
     <!-- Debug info - hidden by default -->
@@ -572,6 +590,7 @@ function getQuestionBankEditorHtml(questionData = null) {
         question: form.question.value,
         points: form.points.value,
         imageUrl: form.imageUrl.value,
+        youtubeUrl: form.youtubeUrl.value, // Added YouTube URL
         options: [],
         correctOptions: []
       };
@@ -638,6 +657,26 @@ function getQuestionBankEditorHtml(questionData = null) {
 }
 
 /**
+ * Extract YouTube video ID from various YouTube URL formats
+ * @param {string} url - A YouTube URL
+ * @return {string|null} - The YouTube video ID or null if not found
+ */
+function qbExtractYoutubeId_(url) {
+  if (!url) return null;
+  
+  // Different YouTube URL formats:
+  // - https://www.youtube.com/watch?v=VIDEO_ID
+  // - https://youtu.be/VIDEO_ID
+  // - https://www.youtube.com/embed/VIDEO_ID
+  // - https://www.youtube.com/v/VIDEO_ID
+  
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+  const match = url.match(regExp);
+  
+  return (match && match[2].length === 11) ? match[2] : null;
+}
+
+/**
  * This function should be called from your existing onOpen function 
  * to integrate the Question Bank Editor with your menu
  */
@@ -690,7 +729,7 @@ function updateOnOpenForEditor() {
  * Smart function to handle comma-separated options for multiple select questions
  * This should work with your existing code for handling answers
  */
-function processMultipleSelectAnswer(userAnswer, questionId, allOptions) {
+function qbProcessMultipleSelectAnswer_(userAnswer, questionId, allOptions) {
   // For multiple select questions, we need to handle commas in the text
   if (!userAnswer) return [];
   

@@ -1,8 +1,15 @@
+function manualGetMMSpreadsheet_() {
+  const id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  if (id) return SpreadsheetApp.openById(id);
+  // fallback if running from container-bound spreadsheet UI
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
 /**
  * Add manual points to a user
  */
 function addManualPoints(mnemonic, questionId, points, reason, type) {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = manualGetMMSpreadsheet_();
     const scoresSheet = sheet.getSheetByName(SHEETS.SCORES);
     const auditLogSheet = sheet.getSheetByName(SHEETS.AUDIT_LOG);
 
@@ -108,7 +115,7 @@ function addManualPoints(mnemonic, questionId, points, reason, type) {
  * Handle form grading override from Form Responses
  */
 function handleFormGradeOverride() {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = manualGetMMSpreadsheet_();
     const formResponsesSheet = sheet.getSheetByName(SHEETS.FORM_RESPONSES);
     const scoresSheet = sheet.getSheetByName(SHEETS.SCORES);
     
@@ -294,7 +301,7 @@ function showManualPointsDialog() {
  * Adds Manual Grade Processing Log 
  */
 function setupManualGradeProcessingLog() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = manualGetMMSpreadsheet_();
   
   // Create the processing log sheet
   let processingLogSheet = sheet.getSheetByName("Manual Grade Processing Log");
@@ -357,7 +364,7 @@ function setupManualGradeProcessingLog() {
  * After adding manual points, add to Manual Grade Processing log:
  */
 function addToManualGradeLog(timestamp, mnemonic, points, questionId, pointType, reason) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = manualGetMMSpreadsheet_();
   let processingLogSheet = sheet.getSheetByName("Manual Grade Processing Log");
   
   if (!processingLogSheet) {
@@ -381,7 +388,7 @@ function addToManualGradeLog(timestamp, mnemonic, points, questionId, pointType,
  * Adds option to recover Bonus Points in case Audit Log is deleted
  */
 function recoverBonusPoints() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = manualGetMMSpreadsheet_();
   const processingLogSheet = sheet.getSheetByName("Manual Grade Processing Log");
   
   if (!processingLogSheet) {
@@ -473,7 +480,7 @@ function recoverBonusPoints() {
  * Update score directly without adding to logs again
  */
 function directlyUpdateScore(mnemonic, questionId, points, reason) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = manualGetMMSpreadsheet_();
   const scoresSheet = sheet.getSheetByName(SHEETS.SCORES);
   const auditLogSheet = sheet.getSheetByName(SHEETS.AUDIT_LOG);
   

@@ -77,7 +77,3 @@ function processWinners(sheet, round) {
 function columnToIndex(col) {
     return col.charCodeAt(0) - 64; // Converts "A"=1, "B"=2, etc.
 }
-
-
-
-

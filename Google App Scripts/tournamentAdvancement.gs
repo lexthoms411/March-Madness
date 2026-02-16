@@ -1,17 +1,19 @@
 /**
  * Tournament advancement functions for March Madness challenge
- * Handles advancement for all rounds with date-based scoring
+ * Modified to implement re-seeding after each round
+ * Highest seed plays lowest seed in subsequent rounds
  */
 
 // Round start dates
 const ROUND_DATES = {
-  ROUND_2: new Date("2025-03-09T00:00:00"),
-  ROUND_3: new Date("2025-03-16T00:00:00"),
-  ROUND_4: new Date("2025-03-23T00:00:00")
+  ROUND_2: new Date("2026-03-08T00:00:00"),
+  ROUND_3: new Date("2026-03-15T00:00:00"),
+  ROUND_4: new Date("2026-03-22T00:00:00")
 };
 
 /**
  * Advances winners from Round 1 to Round 2
+ * After Round 1, teams will be re-seeded based on scores
  */
 function advanceToRoundTwo() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -31,23 +33,45 @@ function advanceToRoundTwo() {
     const winner = (score1 >= score2) ? team1 : team2;
     const winnerScore = Math.max(score1, score2);
     
-    // Calculate position for winner in Round 2
-    // Each pair of teams in Round 1 produces one winner for Round 2
-    const round2Row = Math.floor((i - 2) / 2) + 2;
-    
-    // Add to winners list for reporting
+    // Add to winners list
     winners.push({
       team: winner,
       score: winnerScore,
-      fromRow: (score1 >= score2) ? i : (i + 1),
-      toRow: round2Row
+      fromRow: (score1 >= score2) ? i : (i + 1)
     });
+  }
+  
+  // Sort winners by score from highest to lowest (for seeding)
+  winners.sort((a, b) => b.score - a.score);
+  
+  // Create matchups for Round 2: #1 vs #8, #4 vs #5, #2 vs #7, #3 vs #6
+  const round2Matchups = [
+    [0, 7], // #1 vs #8
+    [3, 4], // #4 vs #5
+    [1, 6], // #2 vs #7
+    [2, 5]  // #3 vs #6
+  ];
+  
+  // Place teams in Round 2 based on seeding
+  for (let i = 0; i < round2Matchups.length; i++) {
+    const [seed1Index, seed2Index] = round2Matchups[i];
+    const team1 = winners[seed1Index];
+    const team2 = winners[seed2Index];
     
-    // Place winner in Round 2 column (column E)
-    teamScoreSheet.getRange(round2Row, 5).setValue(winner);
+    // Row positions for this matchup in Round 2
+    const matchupStartRow = 2 + (i * 2);
     
-    // Reset the score to 0 in Round 2 score column (column F)
-    teamScoreSheet.getRange(round2Row, 6).setValue(0);
+    // Place teams in Round 2 column (column E)
+    teamScoreSheet.getRange(matchupStartRow, 5).setValue(team1.team);
+    teamScoreSheet.getRange(matchupStartRow + 1, 5).setValue(team2.team);
+    
+    // Reset the scores to 0 in Round 2 score column (column F)
+    teamScoreSheet.getRange(matchupStartRow, 6).setValue(0);
+    teamScoreSheet.getRange(matchupStartRow + 1, 6).setValue(0);
+    
+    // Update team objects with their new positions
+    team1.toRow = matchupStartRow;
+    team2.toRow = matchupStartRow + 1;
   }
   
   // Format the Round 2 section
@@ -55,7 +79,7 @@ function advanceToRoundTwo() {
   round2Range.setBorder(true, true, true, true, true, true, "black", SpreadsheetApp.BorderStyle.SOLID);
   
   // Log the advancement operation
-  console.log(`Advanced ${winners.length} teams to Round 2: ${winners.map(w => w.team).join(', ')}`);
+  console.log(`Advanced ${winners.length} teams to Round 2 with re-seeding: ${winners.map(w => w.team).join(', ')}`);
   
   // Return winners information
   return winners;
@@ -70,6 +94,7 @@ function updateRoundTwoScores() {
 
 /**
  * Advances winners from Round 2 to Round 3 (semifinals)
+ * Teams will be re-seeded based on Round 2 scores
  */
 function advanceToRoundThree() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -89,22 +114,43 @@ function advanceToRoundThree() {
     const winner = (score1 >= score2) ? team1 : team2;
     const winnerScore = Math.max(score1, score2);
     
-    // Calculate position for winner in Round 3
-    const round3Row = Math.floor((i - 2) / 2) + 2;
-    
-    // Add to winners list for reporting
+    // Add to winners list
     winners.push({
       team: winner,
       score: winnerScore,
-      fromRow: (score1 >= score2) ? i : (i + 1),
-      toRow: round3Row
+      fromRow: (score1 >= score2) ? i : (i + 1)
     });
+  }
+  
+  // Sort winners by score from highest to lowest (for seeding)
+  winners.sort((a, b) => b.score - a.score);
+  
+  // Create matchups for Round 3: #1 vs #4, #2 vs #3
+  const round3Matchups = [
+    [0, 3], // #1 vs #4
+    [1, 2]  // #2 vs #3
+  ];
+  
+  // Place teams in Round 3 based on seeding
+  for (let i = 0; i < round3Matchups.length; i++) {
+    const [seed1Index, seed2Index] = round3Matchups[i];
+    const team1 = winners[seed1Index];
+    const team2 = winners[seed2Index];
     
-    // Place winner in Round 3 column (column I)
-    teamScoreSheet.getRange(round3Row, 9).setValue(winner);
+    // Row positions for this matchup in Round 3
+    const matchupStartRow = 2 + (i * 2);
     
-    // Reset the score to 0 in Round 3 score column (column J)
-    teamScoreSheet.getRange(round3Row, 10).setValue(0);
+    // Place teams in Round 3 column (column I)
+    teamScoreSheet.getRange(matchupStartRow, 9).setValue(team1.team);
+    teamScoreSheet.getRange(matchupStartRow + 1, 9).setValue(team2.team);
+    
+    // Reset the scores to 0 in Round 3 score column (column J)
+    teamScoreSheet.getRange(matchupStartRow, 10).setValue(0);
+    teamScoreSheet.getRange(matchupStartRow + 1, 10).setValue(0);
+    
+    // Update team objects with their new positions
+    team1.toRow = matchupStartRow;
+    team2.toRow = matchupStartRow + 1;
   }
   
   // Format the Round 3 section
@@ -112,7 +158,7 @@ function advanceToRoundThree() {
   round3Range.setBorder(true, true, true, true, true, true, "black", SpreadsheetApp.BorderStyle.SOLID);
   
   // Log the advancement operation
-  console.log(`Advanced ${winners.length} teams to Round 3: ${winners.map(w => w.team).join(', ')}`);
+  console.log(`Advanced ${winners.length} teams to Round 3 with re-seeding: ${winners.map(w => w.team).join(', ')}`);
   
   // Return winners information
   return winners;
@@ -127,6 +173,7 @@ function updateRoundThreeScores() {
 
 /**
  * Advances winners from Round 3 to Round 4 (finals)
+ * No reseeding needed for finals as there are only 2 teams
  */
 function advanceToRoundFour() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -146,23 +193,28 @@ function advanceToRoundFour() {
     const winner = (score1 >= score2) ? team1 : team2;
     const winnerScore = Math.max(score1, score2);
     
-    // Calculate position for winner in Round 4
-    const round4Row = Math.floor((i - 2) / 2) + 2;
-    
-    // Add to winners list for reporting
+    // Add to winners list
     winners.push({
       team: winner,
       score: winnerScore,
-      fromRow: (score1 >= score2) ? i : (i + 1),
-      toRow: round4Row
+      fromRow: (score1 >= score2) ? i : (i + 1)
     });
-    
-    // Place winner in Round 4 column (column M)
-    teamScoreSheet.getRange(round4Row, 13).setValue(winner);
-    
-    // Reset the score to 0 in Round 4 score column (column N)
-    teamScoreSheet.getRange(round4Row, 14).setValue(0);
   }
+  
+  // Sort winners by score (though we only have 2 teams now)
+  winners.sort((a, b) => b.score - a.score);
+  
+  // Place teams in Round 4 column (column M)
+  teamScoreSheet.getRange(2, 13).setValue(winners[0].team);
+  teamScoreSheet.getRange(3, 13).setValue(winners[1].team);
+  
+  // Reset the scores to 0 in Round 4 score column (column N)
+  teamScoreSheet.getRange(2, 14).setValue(0);
+  teamScoreSheet.getRange(3, 14).setValue(0);
+  
+  // Update team objects with their new positions
+  winners[0].toRow = 2;
+  winners[1].toRow = 3;
   
   // Format the Round 4 section
   const round4Range = teamScoreSheet.getRange("M2:N3");
@@ -286,12 +338,23 @@ function updateRoundScores(roundNumber, teamColumn, scoreColumn, startDate) {
   // Update scores in the sheet
   for (let i = 0; i < roundTeams.length; i++) {
     const teamName = roundTeams[i];
-    const row = i + 2; // Start at row 2
-    const score = teamScores[teamName] || 0;
     
-    // Update the score column
-    teamScoreSheet.getRange(row, scoreColumn).setValue(score);
-    console.log(`Updated ${teamName} with score ${score} in Round ${roundNumber}`);
+    // Find which row this team is in for this round
+    let row = -1;
+    for (let j = 2; j <= teamCount + 1; j++) {
+      if (teamScoreSheet.getRange(j, teamColumn).getValue() === teamName) {
+        row = j;
+        break;
+      }
+    }
+    
+    if (row > 0) {
+      const score = teamScores[teamName] || 0;
+      
+      // Update the score column
+      teamScoreSheet.getRange(row, scoreColumn).setValue(score);
+      console.log(`Updated ${teamName} with score ${score} in Round ${roundNumber}`);
+    }
   }
   
   return `Updated scores for ${roundTeams.length} teams in Round ${roundNumber}.`;

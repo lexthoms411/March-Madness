@@ -1,5 +1,5 @@
-// Form and Sheet Configuration Update with correct FormID
-const FORM_ID = "xxxWSfeXXQJvh7wT8z9-Sk_d2pjeyLEf55dMWkxxxxxx";
+// Form and Sheet Configuration
+const FORM_ID = "1wNoMsS6xTrenhXvnjKTwzH-orK03aLRCFuPiHZMSBrA";
 
 const SHEETS = {
     QUESTION_BANK: 'Question Bank',
@@ -14,8 +14,16 @@ const SHEETS = {
 
 const SECTIONS = {
     RN: 'RN Section',
-    PCA: 'PCA Section'
+    PCA: 'PCA Section',
+    LPN: 'LPN Section'
 };
+
+function getMMSpreadsheet_() {
+  const id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  if (id) return SpreadsheetApp.openById(id);
+  // fallback if running from container-bound spreadsheet UI
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
 
 /**
  * Simple logging function
@@ -44,7 +52,7 @@ function logToSheet(action, status, details) {
  */
 function logError(action, message, details = '') {
     try {
-        const sheet = SpreadsheetApp.getActiveSpreadsheet();
+        const sheet = getMMSpreadsheet_();
         let errorSheet = sheet.getSheetByName(SHEETS.ERROR_LOG);
         
         if (!errorSheet) {
@@ -69,7 +77,7 @@ function logError(action, message, details = '') {
  * Mark error as resolved
  */
 function resolveError(rowIndex) {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = getMMSpreadsheet_();
     const errorSheet = sheet.getSheetByName(SHEETS.ERROR_LOG);
     
     if (errorSheet) {
@@ -493,8 +501,6 @@ function getOptionsMapWithCache(questionBankSheet) {
  * Get all answer options for each question (full text)
  */
 function getAnswerOptionsMap(questionBankSheet) {
-    console.log("Building options map from question bank");
-    
     const data = questionBankSheet.getDataRange().getValues();
     const optionsMap = {};
     
@@ -506,10 +512,8 @@ function getAnswerOptionsMap(questionBankSheet) {
                             data[i][6], data[i][7], data[i][8]]
                             .filter(Boolean); // Remove empty entries
             
-            // Store the full option text - essential for smart comma handling
+            // Store full option text - used for smart comma handling.
             optionsMap[qID] = options;
-            
-            console.log(`Added ${options.length} options for ${qID}`);
         }
     }
     
@@ -521,17 +525,11 @@ function getAnswerOptionsMap(questionBankSheet) {
  */
 function getAnswerLetters(answerText, qID, answerMapping, questionOptions = []) {
     if (!answerText) return answerText;
-    
-    // Log for debugging
-    console.log(`Processing answer for ${qID}: ${answerText}`);
-    
+
     // Check if we have answer mapping for this question
     if (!answerMapping || !answerMapping[qID]) {
-        console.log(`No letter mapping for ${qID}`);
         return answerText;
     }
-    
-    console.log(`Available mappings for ${qID}: ${JSON.stringify(answerMapping[qID] || {})}`);
     
     // For multiple select questions with commas, we need special handling
     if (answerText.includes(',')) {
@@ -586,7 +584,6 @@ function getAnswerLetters(answerText, qID, answerMapping, questionOptions = []) 
         if (letter) {
             return letter;
         } else {
-            console.log(`No mapping found for '${answerText}' in ${qID}`);
             return answerText;
         }
     }
@@ -598,12 +595,19 @@ function getAnswerLetters(answerText, qID, answerMapping, questionOptions = []) 
 function getAnswerMappingWithCache(questionMap) {
     const cache = CacheService.getScriptCache();
     const cacheKey = 'answerMapping';
-    
-    // Clear the cache to force refresh (remove this line for production)
-    cache.remove(cacheKey);
+
+    // Use cache first.
+    const cachedData = cache.get(cacheKey);
+    if (cachedData) {
+        try {
+            return JSON.parse(cachedData);
+        } catch (e) {
+            console.warn("⚠️ Cache parse error, rebuilding answer mapping");
+        }
+    }
     
     // Build the answer mapping fresh
-    const sheet = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = getMMSpreadsheet_();
     const questionBankSheet = sheet.getSheetByName(SHEETS.QUESTION_BANK);
     const questionBankData = questionBankSheet.getDataRange().getValues();
     const answerMapping = {};
@@ -629,9 +633,6 @@ function getAnswerMappingWithCache(questionMap) {
             // Only store if we have mappings
             if (Object.keys(letterMap).length > 0) {
                 answerMapping[qID] = letterMap;
-                
-                // Debug output
-                console.log(`Created letter mapping for ${qID}: ${JSON.stringify(letterMap)}`);
             }
         }
     }
@@ -644,4 +645,30 @@ function getAnswerMappingWithCache(questionMap) {
     }
     
     return answerMapping;
+}
+
+function debugFormAccess() {
+  Logger.log('FORM_ID = %s', FORM_ID);
+
+  // If someone accidentally pasted a URL, extract the ID
+  const id = extractFormId(FORM_ID);
+  Logger.log('Parsed ID = %s', id);
+
+  const form = FormApp.openById(id);
+  Logger.log('Form title = %s', form.getTitle());
+}
+
+function extractFormId(maybeIdOrUrl) {
+  const s = String(maybeIdOrUrl || '').trim();
+  if (!s) throw new Error('FORM_ID is blank.');
+
+  // If it’s a URL, grab /d/<id>/ or ?id=<id>
+  const m1 = s.match(/\/d\/([a-zA-Z0-9_-]+)\//);
+  if (m1 && m1[1]) return m1[1];
+
+  const m2 = s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (m2 && m2[1]) return m2[1];
+
+  // Assume it’s already a raw ID
+  return s;
 }

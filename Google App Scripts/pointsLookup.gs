@@ -1,10 +1,31 @@
 // Code.gs file
-function doGet() {
-  return HtmlService.createTemplateFromFile('PointsLookup')
+// pointsLookup.gs (or wherever your existing doGet lives)
+function doGet(e) {
+  const page = (e?.parameter?.page || '').toString();
+
+  if (page === 'admin') {
+    // If already logged in, show panel; otherwise show login page
+    if (hasAdminSession_()) {
+      return HtmlService.createTemplateFromFile('AdminPanel')
+        .evaluate()
+        .setTitle('March Madness Admin Panel')
+        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    }
+
+    return HtmlService.createTemplateFromFile('AdminLogin')
       .evaluate()
-      .setTitle('March Madness Points Lookup')
+      .setTitle('Admin Login')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+
+  return HtmlService.createTemplateFromFile('PointsLookup')
+    .evaluate()
+    .setTitle('March Madness Points Lookup')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
+
+
+
 
 function getPointsForMnemonic(mnemonic) {
   // Trim and lowercase for consistent comparison
