@@ -126,6 +126,7 @@ function adminGetContext() {
     canTeams: adminUser.canTeams,
     active: adminUser.active,
     isOwner: isOwner_(adminUser),
+    allowedActions: adminListAllowedActionsForUser(adminUser),
   };
 }
 
@@ -152,6 +153,13 @@ function timingSafeEqual_(a, b) {
   return out === 0;
 }
 
+function toBool_(v) {
+  if (v === true) return true;
+  if (v === false || v === null || v === undefined) return false;
+  const s = String(v).trim().toLowerCase();
+  return s === 'true' || s === '1' || s === 'yes' || s === 'y' || s === 'on';
+}
+
 // -------------------------------
 // ADMIN LOOKUP & PERMISSIONS
 // -------------------------------
@@ -165,25 +173,47 @@ function getAdminUserByEmail_(email) {
   const values = sheet.getDataRange().getValues();
   if (!values.length) throw new Error(`${ADMIN_SHEET_NAME} is empty.`);
 
-  const headers = values.shift().map(h => String(h).trim());
-  const idx = {};
-  headers.forEach((h, i) => idx[h] = i);
+  const headers = values.shift().map(h => String(h || '').trim());
+  const normHeaders = headers.map(h => h.toLowerCase().replace(/[^a-z0-9]+/g, ''));
 
-  const row = values.find(r => String(r[idx.Email] || '').toLowerCase().trim() === email);
+  function findIdx_(aliases) {
+    const target = aliases.map(a => String(a).toLowerCase().replace(/[^a-z0-9]+/g, ''));
+    for (let i = 0; i < normHeaders.length; i++) {
+      if (target.includes(normHeaders[i])) return i;
+    }
+    return -1;
+  }
+
+  const idx = {
+    email: findIdx_(['Email']),
+    name: findIdx_(['Name']),
+    unit: findIdx_(['Unit']),
+    role: findIdx_(['Role']),
+    active: findIdx_(['Active', 'IsActive', 'Enabled']),
+    canRoster: findIdx_(['CanRoster', 'Roster', 'CanEditRoster']),
+    canQuestions: findIdx_(['CanQuestions', 'Questions', 'CanEditQuestions']),
+    canPoints: findIdx_(['CanPoints', 'Points', 'ManualPoints']),
+    canAudit: findIdx_(['CanAudit', 'Audit', 'Reports', 'CanReports']),
+    canTeams: findIdx_(['CanTeams', 'Teams', 'TeamTools', 'CanEditTeams'])
+  };
+
+  if (idx.email < 0) throw new Error(`${ADMIN_SHEET_NAME} is missing an Email column.`);
+
+  const row = values.find(r => String(r[idx.email] || '').toLowerCase().trim() === email);
   if (!row) return null;
 
   return {
     email,
-    name: idx.Name !== undefined ? String(row[idx.Name] || '') : '',
-    unit: idx.Unit !== undefined ? String(row[idx.Unit] || '') : '',
-    role: idx.Role !== undefined ? String(row[idx.Role] || '') : '',
+    name: idx.name >= 0 ? String(row[idx.name] || '') : '',
+    unit: idx.unit >= 0 ? String(row[idx.unit] || '') : '',
+    role: idx.role >= 0 ? String(row[idx.role] || '') : '',
 
-    active: idx.Active !== undefined ? row[idx.Active] === true : false,
-    canRoster: idx.CanRoster !== undefined ? row[idx.CanRoster] === true : false,
-    canQuestions: idx.CanQuestions !== undefined ? row[idx.CanQuestions] === true : false,
-    canPoints: idx.CanPoints !== undefined ? row[idx.CanPoints] === true : false,
-    canAudit: idx.CanAudit !== undefined ? row[idx.CanAudit] === true : false,
-    canTeams: idx.CanTeams !== undefined ? row[idx.CanTeams] === true : false,
+    active: idx.active >= 0 ? toBool_(row[idx.active]) : false,
+    canRoster: idx.canRoster >= 0 ? toBool_(row[idx.canRoster]) : false,
+    canQuestions: idx.canQuestions >= 0 ? toBool_(row[idx.canQuestions]) : false,
+    canPoints: idx.canPoints >= 0 ? toBool_(row[idx.canPoints]) : false,
+    canAudit: idx.canAudit >= 0 ? toBool_(row[idx.canAudit]) : false,
+    canTeams: idx.canTeams >= 0 ? toBool_(row[idx.canTeams]) : false,
   };
 }
 
@@ -231,8 +261,6 @@ function logAdminAction_(adminUser, action, payload, result) {
 const ADMIN_ACTIONS = Object.freeze({
   // Grading Management
   ADD_MANUAL_POINTS: { perm: 'canPoints', fn: 'adminAddManualPointsWeb', uiOnly: false },
-  TEST_SIMULATE_RESPONSES: { perm: 'owner', fn: 'adminSimulateStressResponsesWeb', uiOnly: false },
-  TEST_RESET_COMPETITION_DATA: { perm: 'owner', fn: 'adminResetCompetitionTestDataWeb', uiOnly: false },
   ROSTER_LIST: { perm: 'canRoster', fn: 'adminListRosterWeb', uiOnly: false },
   ROSTER_SAVE: { perm: 'canRoster', fn: 'adminSaveRosterWeb', uiOnly: false },
   ROSTER_REMOVE: { perm: 'canRoster', fn: 'adminRemoveRosterWeb', uiOnly: false },
@@ -313,6 +341,7 @@ function adminListAllowedActionsForUser(adminUser) {
   const allowed = [];
   Object.keys(ADMIN_ACTIONS).forEach((k) => {
     const meta = ADMIN_ACTIONS[k];
+    if (meta.uiOnly) return; // Web app should only show runnable actions.
     if (meta.perm === 'owner') {
       if (isOwner_(adminUser)) allowed.push(k);
     } else {
@@ -320,14 +349,6 @@ function adminListAllowedActionsForUser(adminUser) {
     }
   });
   return allowed;
-}
-
-function adminSimulateStressResponsesWeb(payload) {
-  return simulateStressResponses(payload || {});
-}
-
-function adminResetCompetitionTestDataWeb(payload) {
-  return resetCompetitionTestData(payload || {});
 }
 
 function getQuestionBankSheet_() {
@@ -359,7 +380,7 @@ function getScoresSchema_() {
       mnemonic: findHeaderIndex_(headers, ['mnemonic']),
       name: findHeaderIndex_(headers, ['name', 'full name']),
       role: findHeaderIndex_(headers, ['role']),
-      unit: findHeaderIndex_(headers, ['unit']),
+      unit: findHeaderIndex_(headers, ['unit', 'department', 'dept']),
       score: findHeaderIndex_(headers, ['score', 'total score', 'points', 'total points']),
       attempts: findHeaderIndex_(headers, ['attempts', 'question attempts'])
     }
@@ -367,28 +388,90 @@ function getScoresSchema_() {
 }
 
 function getTeamsSchema_() {
-  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Teams');
-  if (!sh) throw new Error('Teams sheet not found.');
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const requiredAliases = {
+    team: ['team', 'team name'],
+    mnemonic: ['mnemonic', 'member', 'member mnemonic']
+  };
+  function hasRequiredHeaders_(headers) {
+    const teamIdx = findHeaderIndex_(headers, requiredAliases.team);
+    const mnemonicIdx = findHeaderIndex_(headers, requiredAliases.mnemonic);
+    return teamIdx >= 0 && mnemonicIdx >= 0;
+  }
+  const candidates = [
+    'Teams_Members',
+    'Teams Members',
+    'Team_Members',
+    'Team Members',
+    'Teams_Members_Data',
+    'Teams Members Data',
+    'Teams',
+    'Teams_Master'
+  ];
+  let sh = null;
+  let headers = null;
+  const presentCandidates = [];
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = ss.getSheetByName(candidates[i]);
+    if (!candidate) continue;
+    presentCandidates.push(candidates[i]);
+    const data = candidate.getDataRange().getValues();
+    if (!data.length) continue;
+    const rowHeaders = data[0];
+    if (hasRequiredHeaders_(rowHeaders)) {
+      sh = candidate;
+      headers = rowHeaders;
+      break;
+    }
+  }
+  if (!sh) {
+    if (!presentCandidates.length) {
+      throw new Error('Teams sheet not found. Expected one of: ' + candidates.join(', '));
+    }
+    throw new Error(
+      'No valid team-members sheet found. Found: ' + presentCandidates.join(', ') +
+      '. Required headers include Team Name and Mnemonic in row 1.'
+    );
+  }
   const values = sh.getDataRange().getValues();
   if (!values.length) throw new Error('Teams sheet is empty.');
-  const headers = values[0];
+  headers = headers || values[0];
   return {
     sheet: sh,
     values,
     headers,
     idx: {
       team: findHeaderIndex_(headers, ['team', 'team name']),
-      mnemonic: findHeaderIndex_(headers, ['mnemonic', 'member', 'member mnemonic'])
+      mnemonic: findHeaderIndex_(headers, ['mnemonic', 'member', 'member mnemonic']),
+      unit: findHeaderIndex_(headers, ['unit', 'department', 'dept'])
     }
   };
 }
 
 function normalizeUnit_(u) {
-  return String(u || '').trim().toUpperCase();
+  return String(u || '').trim();
+}
+
+function normalizeUnitKey_(u) {
+  return normalizeUnit_(u).toUpperCase();
 }
 
 function normalizeMnemonic_(m) {
   return String(m || '').trim().toLowerCase();
+}
+
+function getTeamMemberInfoByMnemonicMap_() {
+  const t = getTeamsSchema_();
+  if (t.idx.mnemonic < 0) throw new Error('Teams sheet must contain Mnemonic column.');
+  const map = new Map();
+  for (let i = 1; i < t.values.length; i++) {
+    const mnemonic = normalizeMnemonic_(t.values[i][t.idx.mnemonic]);
+    if (!mnemonic) continue;
+    const team = t.idx.team >= 0 ? String(t.values[i][t.idx.team] || '').trim() : '';
+    const unit = t.idx.unit >= 0 ? normalizeUnit_(t.values[i][t.idx.unit]) : '';
+    map.set(mnemonic, { team, unit });
+  }
+  return map;
 }
 
 function getTeamByMnemonicMap_() {
@@ -409,14 +492,16 @@ function getTeamByMnemonicMap_() {
 function resolveTargetUnitForAdmin_(adminUser, payload) {
   const requested = normalizeUnit_(payload?.unit || '');
   const adminUnit = normalizeUnit_(adminUser?.unit || '');
+  const requestedKey = normalizeUnitKey_(requested);
+  const adminUnitKey = normalizeUnitKey_(adminUnit);
   const owner = isOwner_(adminUser);
 
   if (owner) {
     // Owner can run all units or specific unit.
     return requested;
   }
-  if (!adminUnit) throw new Error('Your admin account has no unit assigned.');
-  if (requested && requested !== adminUnit) {
+  if (!adminUnitKey) throw new Error('Your admin account has no unit assigned.');
+  if (requestedKey && requestedKey !== adminUnitKey) {
     throw new Error('You can only access your own unit.');
   }
   return adminUnit;
@@ -427,9 +512,10 @@ function adminListRosterWeb(payload) {
   const owner = isOwner_(adminUser);
   const targetUnit = resolveTargetUnitForAdmin_(adminUser, payload);
   const s = getScoresSchema_();
-  const teamMap = getTeamByMnemonicMap_();
+  const teamMemberInfo = getTeamMemberInfoByMnemonicMap_();
   const rows = [];
-  const unitSet = new Set();
+  const unitMap = new Map(); // key -> display value
+  const targetUnitKey = normalizeUnitKey_(targetUnit);
 
   if (s.idx.mnemonic < 0) throw new Error('Scores sheet must contain Mnemonic column.');
 
@@ -437,19 +523,29 @@ function adminListRosterWeb(payload) {
     const r = s.values[i];
     const mnemonic = normalizeMnemonic_(r[s.idx.mnemonic]);
     if (!mnemonic) continue;
-    const unit = s.idx.unit >= 0 ? normalizeUnit_(r[s.idx.unit]) : '';
-    if (!owner && targetUnit && unit !== targetUnit) continue;
-    if (owner && targetUnit && unit !== targetUnit) continue;
+    const name = s.idx.name >= 0 ? String(r[s.idx.name] || '').trim() : '';
+    const role = s.idx.role >= 0 ? String(r[s.idx.role] || '').trim().toUpperCase() : '';
+    const memberInfo = teamMemberInfo.get(mnemonic) || {};
+    const unit = (s.idx.unit >= 0 ? normalizeUnit_(r[s.idx.unit]) : '') || normalizeUnit_(memberInfo.unit || '');
+    const team = String(memberInfo.team || '').trim();
+    const score = s.idx.score >= 0 ? Number(r[s.idx.score]) || 0 : 0;
 
-    if (unit) unitSet.add(unit);
+    // Skip non-person header/summary rows accidentally present in Scores data.
+    if (!name && !role && !unit && !team) continue;
+
+    const unitKey = normalizeUnitKey_(unit);
+    if (!owner && targetUnitKey && unitKey !== targetUnitKey) continue;
+    if (owner && targetUnitKey && unitKey !== targetUnitKey) continue;
+
+    if (unitKey && !unitMap.has(unitKey)) unitMap.set(unitKey, unit);
     rows.push({
       rowNumber: i + 1,
       mnemonic,
-      name: s.idx.name >= 0 ? String(r[s.idx.name] || '').trim() : '',
-      role: s.idx.role >= 0 ? String(r[s.idx.role] || '').trim().toUpperCase() : '',
+      name,
+      role,
       unit,
-      score: s.idx.score >= 0 ? Number(r[s.idx.score]) || 0 : 0,
-      team: teamMap.get(mnemonic) || ''
+      score,
+      team
     });
   }
 
@@ -460,7 +556,7 @@ function adminListRosterWeb(payload) {
     owner,
     adminUnit: normalizeUnit_(adminUser?.unit || ''),
     targetUnit: targetUnit || '',
-    units: Array.from(unitSet).sort()
+    units: Array.from(unitMap.values()).sort((a, b) => String(a).localeCompare(String(b)))
   };
 }
 
@@ -477,20 +573,25 @@ function adminSaveRosterWeb(payload) {
   const name = String(payload?.name || '').trim();
   const role = String(payload?.role || '').trim().toUpperCase();
   const unit = normalizeUnit_(payload?.unit || targetUnit);
+  const unitKey = normalizeUnitKey_(unit);
+  const targetUnitKey = normalizeUnitKey_(targetUnit);
   const points = Number(payload?.score);
 
   if (!name) throw new Error('Name is required.');
   if (!role) throw new Error('Role is required.');
-  if (!unit) throw new Error('Unit is required.');
-  if (!owner && unit !== targetUnit) throw new Error('You can only edit roster entries in your unit.');
+  if (!unitKey) throw new Error('Unit is required.');
+  if (!owner && unitKey !== targetUnitKey) throw new Error('You can only edit roster entries in your unit.');
 
   let rowNumber = -1;
+  const teamMemberInfo = getTeamMemberInfoByMnemonicMap_();
   for (let i = 1; i < s.values.length; i++) {
     const existingMnemonic = normalizeMnemonic_(s.values[i][s.idx.mnemonic]);
     if (existingMnemonic === mnemonic) {
       rowNumber = i + 1;
-      const existingUnit = s.idx.unit >= 0 ? normalizeUnit_(s.values[i][s.idx.unit]) : '';
-      if (!owner && existingUnit && existingUnit !== targetUnit) {
+      const existingUnitFromScores = s.idx.unit >= 0 ? normalizeUnit_(s.values[i][s.idx.unit]) : '';
+      const existingUnit = existingUnitFromScores || normalizeUnit_((teamMemberInfo.get(mnemonic) || {}).unit || '');
+      const existingUnitKey = normalizeUnitKey_(existingUnit);
+      if (!owner && existingUnitKey && existingUnitKey !== targetUnitKey) {
         throw new Error('You can only edit roster entries in your unit.');
       }
       break;
@@ -521,6 +622,7 @@ function adminRemoveRosterWeb(payload) {
   const adminUser = assertAdminSession_();
   const owner = isOwner_(adminUser);
   const targetUnit = resolveTargetUnitForAdmin_(adminUser, payload);
+  const targetUnitKey = normalizeUnitKey_(targetUnit);
   const mnemonic = normalizeMnemonic_(payload?.mnemonic);
   if (!mnemonic) throw new Error('Mnemonic is required.');
 
@@ -529,16 +631,18 @@ function adminRemoveRosterWeb(payload) {
 
   let rowToDelete = -1;
   let existingUnit = '';
+  const teamMemberInfo = getTeamMemberInfoByMnemonicMap_();
   for (let i = 1; i < s.values.length; i++) {
     const m = normalizeMnemonic_(s.values[i][s.idx.mnemonic]);
     if (m === mnemonic) {
       rowToDelete = i + 1;
-      existingUnit = s.idx.unit >= 0 ? normalizeUnit_(s.values[i][s.idx.unit]) : '';
+      const unitFromScores = s.idx.unit >= 0 ? normalizeUnit_(s.values[i][s.idx.unit]) : '';
+      existingUnit = unitFromScores || normalizeUnit_((teamMemberInfo.get(mnemonic) || {}).unit || '');
       break;
     }
   }
   if (rowToDelete < 0) throw new Error('Roster member not found.');
-  if (!owner && existingUnit && existingUnit !== targetUnit) {
+  if (!owner && normalizeUnitKey_(existingUnit) && normalizeUnitKey_(existingUnit) !== targetUnitKey) {
     throw new Error('You can only remove roster entries in your unit.');
   }
 
@@ -561,6 +665,7 @@ function adminAssignTeamWeb(payload) {
   const adminUser = assertAdminSession_();
   const owner = isOwner_(adminUser);
   const targetUnit = resolveTargetUnitForAdmin_(adminUser, payload);
+  const targetUnitKey = normalizeUnitKey_(targetUnit);
   const mnemonic = normalizeMnemonic_(payload?.mnemonic);
   const team = String(payload?.team || '').trim();
   if (!mnemonic) throw new Error('Mnemonic is required.');
@@ -570,14 +675,16 @@ function adminAssignTeamWeb(payload) {
 
   let memberUnit = '';
   let foundMember = false;
+  const teamMemberInfo = getTeamMemberInfoByMnemonicMap_();
   for (let i = 1; i < s.values.length; i++) {
     if (normalizeMnemonic_(s.values[i][s.idx.mnemonic]) !== mnemonic) continue;
     foundMember = true;
-    memberUnit = s.idx.unit >= 0 ? normalizeUnit_(s.values[i][s.idx.unit]) : '';
+    const unitFromScores = s.idx.unit >= 0 ? normalizeUnit_(s.values[i][s.idx.unit]) : '';
+    memberUnit = unitFromScores || normalizeUnit_((teamMemberInfo.get(mnemonic) || {}).unit || '');
     break;
   }
   if (!foundMember) throw new Error('Mnemonic not found in roster.');
-  if (!owner && memberUnit && memberUnit !== targetUnit) {
+  if (!owner && normalizeUnitKey_(memberUnit) && normalizeUnitKey_(memberUnit) !== targetUnitKey) {
     throw new Error('You can only manage teams for your unit.');
   }
 
@@ -609,17 +716,19 @@ function adminRunUnitAnalyticsReportWeb(payload) {
   const owner = isOwner_(adminUser);
   const requestedScope = String(payload?.scope || '').toUpperCase().trim();
   const requestedUnit = normalizeUnit_(payload?.unit || '');
+  const requestedUnitKey = normalizeUnitKey_(requestedUnit);
   const requestedRole = String(payload?.roleFilter || 'All').trim().toUpperCase();
   const roleFilter = (requestedRole === 'RN' || requestedRole === 'PCA' || requestedRole === 'LPN') ? requestedRole : 'All';
   const adminUnit = normalizeUnit_(adminUser?.unit || '');
+  const adminUnitKey = normalizeUnitKey_(adminUnit);
 
   let scope = requestedScope || 'MY_UNIT';
   if (!owner && scope !== 'MY_UNIT') scope = 'MY_UNIT';
-  if (!owner && !adminUnit) throw new Error('Your admin account has no unit assigned.');
+  if (!owner && !adminUnitKey) throw new Error('Your admin account has no unit assigned.');
 
   const s = getScoresSchema_();
   if (s.idx.mnemonic < 0) throw new Error('Scores sheet must contain Mnemonic column.');
-  if (s.idx.unit < 0) throw new Error('Scores sheet must contain Unit column for unit reports.');
+  const teamMemberInfo = getTeamMemberInfoByMnemonicMap_();
 
   const allMnemonics = [];
   const unitMnemonics = [];
@@ -629,18 +738,20 @@ function adminRunUnitAnalyticsReportWeb(payload) {
     targetUnit = 'ALL';
   } else if (scope === 'UNIT') {
     if (!owner) throw new Error('Only owner can run arbitrary unit reports.');
-    if (!requestedUnit) throw new Error('Select a unit.');
+    if (!requestedUnitKey) throw new Error('Select a unit.');
     targetUnit = requestedUnit;
   } else {
     targetUnit = adminUnit;
   }
+  const targetUnitKey = targetUnit === 'ALL' ? 'ALL' : normalizeUnitKey_(targetUnit);
 
   for (let i = 1; i < s.values.length; i++) {
     const mnemonic = normalizeMnemonic_(s.values[i][s.idx.mnemonic]);
     if (!mnemonic) continue;
     allMnemonics.push(mnemonic);
-    const rowUnit = normalizeUnit_(s.values[i][s.idx.unit]);
-    if (targetUnit !== 'ALL' && rowUnit === targetUnit) unitMnemonics.push(mnemonic);
+    const rowUnitFromScores = s.idx.unit >= 0 ? normalizeUnit_(s.values[i][s.idx.unit]) : '';
+    const rowUnit = rowUnitFromScores || normalizeUnit_((teamMemberInfo.get(mnemonic) || {}).unit || '');
+    if (targetUnitKey !== 'ALL' && normalizeUnitKey_(rowUnit) === targetUnitKey) unitMnemonics.push(mnemonic);
   }
 
   const includedSet = new Set(targetUnit === 'ALL' ? allMnemonics : unitMnemonics);

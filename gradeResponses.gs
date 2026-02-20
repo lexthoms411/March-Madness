@@ -2529,6 +2529,8 @@ function onOpen() {
     .addItem('Archive Old Audit Data', 'archiveOldData')
     .addSeparator()
     .addItem('Add Test Data (10 Entries)', 'addTestData')
+    .addItem('Stress Test (300 Responses)', 'runStressTest300')
+    .addItem('Reset Competition Test Data', 'resetCompetitionTestData')
     .addItem('Clear Caches', 'clearCaches')
     .addItem('Setup Automatic Processing', 'setupTriggers')
     .addItem('Reset Raw Sheet', 'resetRawSheet')
@@ -2563,6 +2565,7 @@ function onOpen() {
   const teamToolsMenu = ui.createMenu('Team Tools')
     .addItem('Shuffle Teams (1-TraumaSurg)', 'shuffleTeams_1TraumaSurg')
     .addItem('Shuffle Teams (3-MedOnc)', 'shuffleTeams_3MedOnc')
+    .addItem('Shuffle Teams (4-OrthoNeuro)', 'shuffleTeams_4OrthoNeuro')
     .addItem('Shuffle Teams (5-SurgSpec)', 'shuffleTeams_5SurgSpec')
     .addItem('Shuffle Teams (6-MedSpec)', 'shuffleTeams_6MedSpec')
     .addItem('Shuffle Teams (7-PSCI)', 'shuffleTeams_7PSCI')
@@ -2581,6 +2584,20 @@ function onOpen() {
   
   // Add the main menu to the UI
   quizMenu.addToUi();
+}
+
+function runStressTest300() {
+  const result = simulateStressResponses({
+    count: 300,
+    autoGrade: true,
+    duplicateRate: 0.2
+  });
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    `Inserted ${result.inserted || 0} simulated responses. Duplicates injected: ${(result.mix && result.mix.injectedDuplicateRows) || 0}.`,
+    'Stress Test Complete',
+    7
+  );
+  return result;
 }
 
 /**

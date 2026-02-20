@@ -15,6 +15,13 @@
     button:hover { background:#15325F; }
     .status { margin-top:12px; font-weight:bold; }
     .hint { margin-top:10px; color:#555; font-size:13px; }
+    .next-step { margin-top:12px; display:none; }
+    .secondary {
+      background:#fff;
+      color:#1E407C;
+      border:1px solid #1E407C;
+      margin-left:8px;
+    }
   </style>
 </head>
 <body>
@@ -30,24 +37,44 @@
     <button onclick="login()">Sign in</button>
 
     <div id="status" class="status"></div>
+    <div id="nextStep" class="next-step">
+      <a id="panelLink" href="#" target="_blank" rel="noopener">Open Admin Panel</a>
+      <button type="button" class="secondary" onclick="openPanelInNewTab()">Open in New Tab</button>
+    </div>
     <div class="hint">
       If you don’t have your admin key, contact Lex to reset it.
     </div>
   </div>
 
 <script>
+  const panelUrl = '<?= ScriptApp.getService().getUrl() ?>?page=admin&view=panel';
+
+  function openPanelInNewTab() {
+    window.open(panelUrl, '_blank', 'noopener');
+  }
+
   function login() {
     const email = document.getElementById('email').value.trim();
     const key = document.getElementById('key').value;
     const status = document.getElementById('status');
+    const nextStep = document.getElementById('nextStep');
+    const panelLink = document.getElementById('panelLink');
 
     status.textContent = 'Signing in…';
+    nextStep.style.display = 'none';
 
     google.script.run
       .withSuccessHandler((res) => {
-        status.textContent = 'Success. Redirecting…';
-        // Send to admin panel (no key in URL)
-        window.top.location.href = '<?= ScriptApp.getService().getUrl() ?>?page=admin';
+        status.textContent = 'Success. Signed in.';
+        panelLink.href = panelUrl;
+        const isEmbedded = (window.top !== window.self);
+        if (isEmbedded) {
+          status.textContent = 'Signed in. Open Admin Panel to continue.';
+          nextStep.style.display = 'block';
+          return;
+        }
+        // Non-embedded flow (direct web app use)
+        window.location.href = panelUrl;
       })
       .withFailureHandler((err) => {
         status.textContent = 'Login failed: ' + (err.message || err);

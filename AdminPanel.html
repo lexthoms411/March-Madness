@@ -41,6 +41,7 @@
         display:flex; align-items:center; justify-content:center;
         padding:18px;
       }
+      .modalOverlay.hidden{display:none;}
       .modal{
         width:100%; max-width:560px; background:#fff; border-radius:12px;
         box-shadow:0 12px 32px rgba(0,0,0,.2);
@@ -70,7 +71,10 @@
       </div>
 
       <div id="appBox" class="hidden">
-        <div id="who" class="ok"></div>
+        <div class="row" style="justify-content:space-between; margin-bottom:8px;">
+          <div id="who" class="ok" style="margin:0;"></div>
+          <button onclick="logout()">Logout</button>
+        </div>
 
         <div class="grid" id="actions"></div>
         <div id="runMsg" class="msg"></div>
@@ -210,6 +214,8 @@
               <option value="LPN">LPN</option>
             </select>
             <button class="primary" onclick="runAnalyticsReport()">Run Report</button>
+            <button id="reportExportPdfBtn" onclick="exportCurrentReport('PDF')">Export PDF</button>
+            <button id="reportExportExcelBtn" onclick="exportCurrentReport('EXCEL')">Export Excel</button>
           </div>
           <div id="reportMsg" class="msg"></div>
         </div>
@@ -257,27 +263,14 @@
     <script>
       const ACTIONS = [
         { key:'ADD_MANUAL_POINTS', label:'Add Manual Points' },
-        { key:'TEST_SIMULATE_RESPONSES', label:'Stress Test (300 Responses)' },
-        { key:'TEST_RESET_COMPETITION_DATA', label:'Reset Test Data' },
 
         { key:'ADD_NEW_QUESTION', label:'Add New Question' },
         { key:'EDIT_EXISTING_QUESTION', label:'Edit Existing Question' },
         { key:'UPDATE_DAILY_QUESTIONS', label:'Update Daily Questions' },
 
-        { key:'REPORT_COMPREHENSIVE', label:'Generate Comprehensive Report' },
-        { key:'REPORT_DETAILED_QUESTION', label:'Generate Detailed Question Report' },
-        { key:'EXPORT_REPORT_PDF', label:'Export Report as PDF' },
-        { key:'EXPORT_REPORT_EXCEL', label:'Export Report as Excel' },
         { key:'OPEN_REPORTS_MANAGER', label:'Open Reports Manager' },
         { key:'OPEN_TOPIC_MANAGER', label:'Manage Topics & Policies' },
         { key:'OPEN_ASSIGN_TOPICS', label:'Assign Topics to Questions' },
-
-        { key:'REBUILD_TEAM_MEMBERS', label:'Rebuild Team Members Data' },
-        { key:'SHUFFLE_TEAMS_1', label:'Shuffle Teams (1-TraumaSurg)' },
-        { key:'SHUFFLE_TEAMS_3', label:'Shuffle Teams (3-MedOnc)' },
-        { key:'SHUFFLE_TEAMS_5', label:'Shuffle Teams (5-SurgSpec)' },
-        { key:'SHUFFLE_TEAMS_6', label:'Shuffle Teams (6-MedSpec)' },
-        { key:'SHUFFLE_TEAMS_7', label:'Shuffle Teams (7-PSCI)' },
       ];
       let allowedActionSet = new Set();
       let adminCtx = null;
@@ -301,21 +294,37 @@
 
         google.script.run
           .withSuccessHandler((ctx)=>{
-            adminCtx = ctx || {};
-            document.getElementById('loginBox').classList.add('hidden');
-            document.getElementById('appBox').classList.remove('hidden');
-            document.getElementById('who').textContent =
-              `Logged in as ${ctx.email} (${ctx.unit || 'Unit'} / ${ctx.role || 'Admin'})`;
-
-            renderActions(ctx.allowedActions || []);
-            setupQuestionBankUi(ctx.allowedActions || []);
-            setupRosterUi(ctx.allowedActions || [], ctx || {});
-            setupReportsUi(ctx.allowedActions || [], ctx || {});
+            enterApp(ctx || {});
           })
           .withFailureHandler((err)=>{
             setMsg('loginMsg', err.message || String(err));
           })
           .adminLogin(email, key);
+      }
+
+      function enterApp(ctx){
+        adminCtx = ctx || {};
+        document.getElementById('loginBox').classList.add('hidden');
+        document.getElementById('appBox').classList.remove('hidden');
+        document.getElementById('who').textContent =
+          `Logged in as ${adminCtx.email} (${adminCtx.unit || 'Unit'} / ${adminCtx.role || 'Admin'})`;
+
+        const allowed = adminCtx.allowedActions || [];
+        renderActions(allowed);
+        setupQuestionBankUi(allowed);
+        setupRosterUi(allowed, adminCtx);
+        setupReportsUi(allowed, adminCtx);
+      }
+
+      function hydrateFromSession(){
+        google.script.run
+          .withSuccessHandler((ctx)=>{
+            if (ctx) enterApp(ctx);
+          })
+          .withFailureHandler(()=>{
+            // Not authenticated yet; keep login form visible.
+          })
+          .adminGetContext();
       }
 
       function renderActions(allowed){
@@ -481,6 +490,7 @@
         if (!rosterUiBound) {
           document.getElementById('rosterSearch').addEventListener('input', ()=>renderRosterTable());
           document.getElementById('rosterUnitFilter').addEventListener('change', ()=>loadRoster());
+          document.getElementById('rosterMnemonic').addEventListener('blur', ()=>hydrateRosterEditorFromMnemonic());
           rosterUiBound = true;
         }
 
@@ -488,7 +498,7 @@
         document.getElementById('assignTeamBtn').style.display = canTeams ? '' : 'none';
 
         if (!ctx.isOwner) {
-          document.getElementById('rosterUnit').value = (ctx.unit || '').toUpperCase();
+          document.getElementById('rosterUnit').value = (ctx.unit || '');
         }
 
         buildUnitFilterOptions(ctx, []);
@@ -498,7 +508,8 @@
 
       function buildUnitFilterOptions(ctx, units){
         const previous = document.getElementById('rosterUnitFilter').value || '';
-        knownUnits = Array.from(new Set((units || []).filter(Boolean).map(u => String(u).toUpperCase()))).sort();
+        knownUnits = Array.from(new Set((units || []).filter(Boolean).map(u => String(u).trim())))
+          .sort((a, b) => a.localeCompare(b));
         const select = document.getElementById('rosterUnitFilter');
         if (!select) return;
 
@@ -509,7 +520,7 @@
           if (previous && knownUnits.includes(previous)) select.value = previous;
           select.disabled = false;
         } else {
-          const myUnit = String((ctx && ctx.unit) || '').toUpperCase();
+          const myUnit = String((ctx && ctx.unit) || '').trim();
           select.innerHTML = `<option value="${escapeHtml(myUnit)}">${escapeHtml(myUnit || 'My Unit')}</option>`;
           select.value = myUnit;
           select.disabled = true;
@@ -517,7 +528,7 @@
       }
 
       function getRosterUnitPayload(){
-        if (!adminCtx || !adminCtx.isOwner) return String((adminCtx && adminCtx.unit) || '').toUpperCase();
+        if (!adminCtx || !adminCtx.isOwner) return String((adminCtx && adminCtx.unit) || '').trim();
         return document.getElementById('rosterUnitFilter').value || '';
       }
 
@@ -572,7 +583,7 @@
         document.getElementById('rosterMnemonic').value = '';
         document.getElementById('rosterName').value = '';
         document.getElementById('rosterRole').value = 'RN';
-        document.getElementById('rosterUnit').value = (adminCtx && !adminCtx.isOwner) ? String(adminCtx.unit || '').toUpperCase() : '';
+        document.getElementById('rosterUnit').value = (adminCtx && !adminCtx.isOwner) ? String(adminCtx.unit || '').trim() : '';
         document.getElementById('rosterTeam').value = '';
         document.getElementById('rosterScore').value = '0';
         setMsg('rosterMsg', 'Editing new roster member.');
@@ -596,13 +607,26 @@
         setMsg('rosterMsg', `Editing ${r.mnemonic}.`);
       }
 
+      function hydrateRosterEditorFromMnemonic(){
+        const mnemonic = (document.getElementById('rosterMnemonic').value || '').trim().toLowerCase();
+        if (!mnemonic) return;
+        const r = currentRoster.find(x => String(x.mnemonic || '').toLowerCase() === mnemonic);
+        if (!r) return;
+
+        document.getElementById('rosterName').value = r.name || '';
+        document.getElementById('rosterRole').value = r.role || 'RN';
+        document.getElementById('rosterUnit').value = r.unit || '';
+        document.getElementById('rosterTeam').value = r.team || '';
+        document.getElementById('rosterScore').value = Number(r.score) || 0;
+      }
+
       function saveRosterMember(){
         if (!allowedActionSet.has('ROSTER_SAVE')) return;
         const payload = {
           mnemonic: document.getElementById('rosterMnemonic').value.trim(),
           name: document.getElementById('rosterName').value.trim(),
           role: document.getElementById('rosterRole').value.trim(),
-          unit: document.getElementById('rosterUnit').value.trim().toUpperCase(),
+          unit: document.getElementById('rosterUnit').value.trim(),
           score: Number(document.getElementById('rosterScore').value)
         };
 
@@ -610,7 +634,7 @@
           setMsg('rosterMsg', 'Mnemonic, name, and role are required.');
           return;
         }
-        if (!adminCtx?.isOwner) payload.unit = String(adminCtx.unit || '').toUpperCase();
+        if (!adminCtx?.isOwner) payload.unit = String(adminCtx.unit || '').trim();
 
         setMsg('rosterMsg', 'Saving roster member...');
         google.script.run
@@ -673,6 +697,8 @@
         const section = document.getElementById('reportsSection');
         section.classList.toggle('hidden', !canReport);
         if (!canReport) return;
+        document.getElementById('reportExportPdfBtn').style.display = allowedSet.has('EXPORT_REPORT_PDF') ? '' : 'none';
+        document.getElementById('reportExportExcelBtn').style.display = allowedSet.has('EXPORT_REPORT_EXCEL') ? '' : 'none';
 
         const scope = document.getElementById('reportScope');
         if (ctx.isOwner) {
@@ -704,11 +730,11 @@
 
         const units = (knownUnits && knownUnits.length)
           ? knownUnits
-          : [String((adminCtx && adminCtx.unit) || '').toUpperCase()].filter(Boolean);
+          : [String((adminCtx && adminCtx.unit) || '').trim()].filter(Boolean);
 
         unitSel.innerHTML = units.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
         if (adminCtx && !adminCtx.isOwner) {
-          const myUnit = String(adminCtx.unit || '').toUpperCase();
+          const myUnit = String(adminCtx.unit || '').trim();
           unitSel.value = myUnit;
         } else if (previous && units.includes(previous)) {
           unitSel.value = previous;
@@ -745,60 +771,24 @@
           .adminRun('REPORT_UNIT_ANALYTICS', { scope, unit, roleFilter });
       }
 
+      function exportCurrentReport(format){
+        const action = String(format || '').toUpperCase() === 'PDF' ? 'EXPORT_REPORT_PDF' : 'EXPORT_REPORT_EXCEL';
+        if (!allowedActionSet.has(action)) return;
+        setMsg('reportMsg', `Exporting ${format}...`);
+        google.script.run
+          .withSuccessHandler((res)=>{
+            setMsg('reportMsg', (res && res.message) ? res.message : `${format} export completed.`, true);
+          })
+          .withFailureHandler((err)=>{
+            setMsg('reportMsg', err.message || String(err));
+          })
+          .adminRun(action, {});
+      }
+
       function runAction(action){
         // Special UI for manual points (needs payload)
         if (action === 'ADD_MANUAL_POINTS') {
           openManualPoints();
-          return;
-        }
-
-        if (action === 'TEST_SIMULATE_RESPONSES') {
-          const countRaw = prompt('How many simulated responses?', '300');
-          if (countRaw === null) return;
-          const count = Number(countRaw);
-          if (!Number.isFinite(count) || count <= 0) {
-            setMsg('runMsg', 'Enter a valid positive number for simulated responses.');
-            return;
-          }
-          const dupPctRaw = prompt('Duplicate attempt rate (0-100%)?', '20');
-          if (dupPctRaw === null) return;
-          const dupPct = Number(dupPctRaw);
-          if (!Number.isFinite(dupPct) || dupPct < 0 || dupPct > 100) {
-            setMsg('runMsg', 'Duplicate rate must be a number between 0 and 100.');
-            return;
-          }
-          const duplicateRate = dupPct / 100;
-          const autoGrade = confirm('Auto-grade immediately after generating simulated responses?');
-          setMsg('runMsg','Running stress simulation...');
-          google.script.run
-            .withSuccessHandler((res)=>{
-              const raw = (res && res.raw) ? res.raw : {};
-              const mix = raw.mix || {};
-              setMsg(
-                'runMsg',
-                `Simulation complete. Inserted: ${raw.inserted || 0} | Auto-graded: ${raw.autoGraded ? 'Yes' : 'No'} | DuplicateTarget:${Math.round((raw.duplicateRate || 0) * 100)}% Injected:${mix.injectedDuplicateRows || 0} | Correct:${mix.correctAnswers || 0} Incorrect:${mix.incorrectAnswers || 0} Partial:${mix.partialAnswers || 0} | CorrectRole:${mix.correctRoleCount || 0} WrongRole:${mix.wrongRoleCount || 0}`,
-                true
-              );
-            })
-            .withFailureHandler((err)=>{
-              setMsg('runMsg', err.message || String(err));
-            })
-            .adminRun(action, { count, autoGrade, duplicateRate });
-          return;
-        }
-
-        if (action === 'TEST_RESET_COMPETITION_DATA') {
-          const ok = confirm('This will clear raw responses, audit log, queue/processed rows, and reset all scores/attempts. Continue?');
-          if (!ok) return;
-          setMsg('runMsg','Resetting test data...');
-          google.script.run
-            .withSuccessHandler((res)=>{
-              setMsg('runMsg', (res && res.message) ? res.message : 'Test data reset complete.', true);
-            })
-            .withFailureHandler((err)=>{
-              setMsg('runMsg', err.message || String(err));
-            })
-            .adminRun(action, {});
           return;
         }
 
@@ -896,6 +886,8 @@
           })
           .adminRun('ADD_MANUAL_POINTS', { mnemonic, type, questionId, points, reason });
       }
+
+      document.addEventListener('DOMContentLoaded', hydrateFromSession);
     </script>
   </body>
 </html>
